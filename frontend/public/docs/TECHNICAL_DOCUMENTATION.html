@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentForge — Technical Documentation</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface2: #243044;
+      --text: #e7ecf3;
+      --muted: #9aa8bc;
+      --accent: #4f9cf9;
+      --accent2: #6ee7b7;
+      --border: #2d3a4f;
+      --code-bg: #121820;
+      --warn: #fbbf24;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 16px;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      min-height: 100vh;
+    }
+    nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 1.5rem 1rem;
+    }
+    nav h2 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin: 1.25rem 0 0.5rem;
+    }
+    nav h2:first-child { margin-top: 0; }
+    nav ul { list-style: none; padding: 0; margin: 0; }
+    nav li { margin: 0.2rem 0; }
+    nav a {
+      display: block;
+      padding: 0.35rem 0.6rem;
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    nav a:hover { background: var(--surface2); color: var(--text); text-decoration: none; }
+    main {
+      max-width: 960px;
+      padding: 2.5rem 3rem 4rem;
+    }
+    h1 {
+      font-size: 2.2rem;
+      margin: 0 0 0.5rem;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .subtitle { color: var(--muted); margin-bottom: 2rem; }
+    h2 {
+      font-size: 1.55rem;
+      margin: 2.5rem 0 1rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+    h3 { font-size: 1.15rem; margin: 1.75rem 0 0.75rem; color: var(--accent2); }
+    h4 { font-size: 1rem; margin: 1.25rem 0 0.5rem; }
+    p { margin: 0.75rem 0; }
+    ul, ol { margin: 0.75rem 0; padding-left: 1.5rem; }
+    li { margin: 0.3rem 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.92rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.55rem 0.75rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--surface2); font-weight: 600; }
+    tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    code {
+      font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+      font-size: 0.88em;
+      background: var(--code-bg);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    pre code { background: none; border: none; padding: 0; }
+    .badge {
+      display: inline-block;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.2rem 0.65rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-right: 0.4rem;
+    }
+    .diagram {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      font-family: monospace;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .note {
+      background: rgba(79, 156, 249, 0.1);
+      border-left: 3px solid var(--accent);
+      padding: 0.85rem 1rem;
+      border-radius: 0 6px 6px 0;
+      margin: 1rem 0;
+    }
+    .warn {
+      background: rgba(251, 191, 36, 0.1);
+      border-left: 3px solid var(--warn);
+      padding: 0.85rem 1rem;
+      border-radius: 0 6px 6px 0;
+      margin: 1rem 0;
+    }
+    .method {
+      display: inline-block;
+      min-width: 3.5rem;
+      font-weight: 700;
+      font-size: 0.78rem;
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      text-align: center;
+    }
+    .get { background: #1e3a2f; color: #6ee7b7; }
+    .post { background: #1e2f3a; color: #4f9cf9; }
+    .delete { background: #3a1e1e; color: #f87171; }
+    .ws { background: #2f1e3a; color: #c084fc; }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+      main { padding: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <nav>
+    <h2>AgentForge</h2>
+    <ul>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#components">Components</a></li>
+      <li><a href="#data-flow">Data Flow</a></li>
+      <li><a href="#installation">Installation</a></li>
+      <li><a href="#configuration">Configuration</a></li>
+      <li><a href="#api">REST API</a></li>
+      <li><a href="#websocket">WebSocket</a></li>
+      <li><a href="#agents">Agent System</a></li>
+      <li><a href="#tools">Tools</a></li>
+      <li><a href="#llm">LLM Layer</a></li>
+      <li><a href="#memory">Memory</a></li>
+      <li><a href="#storage">Storage</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#frontend">Frontend</a></li>
+      <li><a href="#launcher">Launcher</a></li>
+      <li><a href="#testing">Testing</a></li>
+      <li><a href="#file-structure">File Structure</a></li>
+    </ul>
+  </nav>
+
+  <main>
+    <h1>AgentForge Technical Documentation</h1>
+    <p class="subtitle">
+      <span class="badge">v0.1.0</span>
+      <span class="badge">Python 3.12</span>
+      <span class="badge">FastAPI</span>
+      <span class="badge">React 18</span>
+      <span class="badge">LiteLLM</span>
+    </p>
+
+    <section id="overview">
+      <h2>1. Overview</h2>
+      <p>
+        AgentForge is a Linux desktop AI platform that combines a <strong>FastAPI backend</strong>,
+        a <strong>React/TypeScript frontend</strong>, and <strong>LiteLLM</strong> for unified access
+        to Ollama and cloud LLM providers. Agents can manipulate files and execute shell commands
+        within a configured workspace, with human approval for non-whitelisted commands.
+      </p>
+      <p>Core capabilities:</p>
+      <ul>
+        <li>Single-agent coding mode with tool use (files, shell, memory)</li>
+        <li>Multi-agent orchestration with six built-in roles and custom YAML roles</li>
+        <li>Task-type based LLM routing (coding, SQL, research, documentation, …)</li>
+        <li>Persistent chat history in SQLite</li>
+        <li>Real-time streaming via WebSocket during agent execution</li>
+        <li>Setup wizard with connectivity and inference tests</li>
+        <li>Bilingual UI (English / German) via i18n JSON files</li>
+      </ul>
+    </section>
+
+    <section id="architecture">
+      <h2>2. System Architecture</h2>
+      <div class="diagram">┌─────────────────────────────────────────────────────────────────┐
+│                        Linux Desktop Host                        │
+│  ┌──────────────┐    HTTP/WS     ┌──────────────────────────┐ │
+│  │ React UI     │◄──────────────►│ FastAPI Backend          │ │
+│  │ (Vite :5173) │                │ (uvicorn :8765)          │ │
+│  └──────────────┘                │                          │ │
+│         ▲                          │  ┌────────────────────┐  │ │
+│         │ Chromium/Tauri           │  │ AgentOrchestrator  │  │ │
+│  ┌──────┴───────┐                  │  │ ToolRegistry       │  │ │
+│  │ run.py       │                  │  │ LLMProvider        │  │ │
+│  │ launcher     │                  │  │ ApprovalManager    │  │ │
+│  └──────────────┘                  │  └─────────┬──────────┘  │ │
+│                                    └────────────┼─────────────┘ │
+└─────────────────────────────────────────────────┼───────────────┘
+                                                  │
+                    ┌─────────────────────────────┼─────────────────┐
+                    │                             │                 │
+              ┌─────▼─────┐              ┌────────▼────────┐  ┌─────▼─────┐
+              │ SQLite DB │              │ Ollama (remote) │  │ Cloud APIs│
+              │ ~/.local/ │              │ :11434          │  │ OpenAI,   │
+              │ share/    │              │                 │  │ Claude,   │
+              │ agentforge│              │                 │  │ Gemini,   │
+              └───────────┘              └─────────────────┘  │ Groq,     │
+                                                                │ Mistral   │
+                                                                └───────────┘</div>
+
+      <h3>Runtime processes</h3>
+      <table>
+        <thead>
+          <tr><th>Process</th><th>Port</th><th>Started by</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>uvicorn (FastAPI)</td><td>8765</td><td><code>run.py</code></td><td>REST API, WebSocket, agent logic</td></tr>
+          <tr><td>Vite dev server</td><td>5173</td><td><code>run.py</code></td><td>React UI with HMR</td></tr>
+          <tr><td>Chromium / Tauri</td><td>—</td><td><code>run.py</code></td><td>Desktop window shell</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="components">
+      <h2>3. Backend Components</h2>
+      <table>
+        <thead>
+          <tr><th>Module</th><th>Path</th><th>Responsibility</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Main app</td><td><code>agentforge/main.py</code></td><td>FastAPI app, CORS, lifespan hooks</td></tr>
+          <tr><td>Routes</td><td><code>agentforge/api/routes.py</code></td><td>REST + WebSocket endpoints</td></tr>
+          <tr><td>Config</td><td><code>agentforge/config.py</code></td><td>Pydantic settings from <code>.env</code></td></tr>
+          <tr><td>Orchestrator</td><td><code>agentforge/agents/orchestrator.py</code></td><td>Single/multi-agent loops, tool rounds</td></tr>
+          <tr><td>Role registry</td><td><code>agentforge/agents/role_registry.py</code></td><td>Built-in + YAML custom roles</td></tr>
+          <tr><td>Approval manager</td><td><code>agentforge/agents/approval_manager.py</code></td><td>Pending shell command approvals</td></tr>
+          <tr><td>Tool registry</td><td><code>agentforge/tools/registry.py</code></td><td>File, directory, shell, memory tools</td></tr>
+          <tr><td>LLM provider</td><td><code>agentforge/llm/provider.py</code></td><td>LiteLLM completion + tool calls</td></tr>
+          <tr><td>Model router</td><td><code>agentforge/llm/model_router.py</code></td><td>Task-type → model resolution</td></tr>
+          <tr><td>Cloud providers</td><td><code>agentforge/llm/cloud_providers.py</code></td><td>API key wiring for cloud LLMs</td></tr>
+          <tr><td>Conversation store</td><td><code>agentforge/storage/conversation_store.py</code></td><td>Chats and messages (SQLite)</td></tr>
+          <tr><td>Model store</td><td><code>agentforge/storage/model_store.py</code></td><td>User model registry + routing</td></tr>
+          <tr><td>Memory store</td><td><code>agentforge/memory/store.py</code></td><td>Per-chat / global context memory</td></tr>
+          <tr><td>Setup service</td><td><code>agentforge/services/setup_service.py</code></td><td>Wizard connectivity tests</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="data-flow">
+      <h2>4. Request Data Flow</h2>
+      <h3>4.1 Chat message (REST)</h3>
+      <ol>
+        <li>Frontend sends <code>POST /api/chats/{id}/messages</code> with content and mode</li>
+        <li><code>AgentOrchestrator.run()</code> loads chat history and memory context</li>
+        <li>Model router selects LLM based on task type (if auto-routing enabled)</li>
+        <li>LLM may return tool calls → tools execute → results fed back (up to 8 rounds)</li>
+        <li>Shell commands outside whitelist create approval requests</li>
+        <li>Final assistant message stored in SQLite; response returned to client</li>
+      </ol>
+
+      <h3>4.2 Real-time streaming (WebSocket)</h3>
+      <ol>
+        <li>Frontend connects to <code>WS /api/ws/chats/{id}</code></li>
+        <li>User message sent as JSON over the socket</li>
+        <li>Server streams agent progress events (tool calls, inter-agent messages)</li>
+        <li>On completion, a <code>done</code> event is sent; on failure, an <code>error</code> event</li>
+      </ol>
+    </section>
+
+    <section id="installation">
+      <h2>5. Installation from GitHub</h2>
+      <pre><code>git clone https://github.com/YOUR_USERNAME/AgentForge.git
+cd AgentForge
+python3 install.py          # venv + pip + npm
+cp .env.example backend/.env
+# edit backend/.env
+python3 run.py</code></pre>
+
+      <h3>5.1 What <code>install.py</code> does</h3>
+      <ul>
+        <li>Creates <code>backend/.venv</code> and installs <code>requirements.txt</code></li>
+        <li>Runs <code>npm install</code> in <code>frontend/</code></li>
+        <li>Optionally installs system packages with <code>--system</code> (Tauri deps)</li>
+        <li>Creates a Linux desktop shortcut via <code>desktop_setup.py</code></li>
+      </ul>
+
+      <h3>5.2 Files that must NOT be committed</h3>
+      <table>
+        <thead><tr><th>Path</th><th>Reason</th></tr></thead>
+        <tbody>
+          <tr><td><code>backend/.venv/</code></td><td>Local Python environment</td></tr>
+          <tr><td><code>frontend/node_modules/</code></td><td>npm dependencies</td></tr>
+          <tr><td><code>backend/.env</code></td><td>Secrets and local URLs</td></tr>
+          <tr><td><code>.run/</code></td><td>PID files and runtime logs</td></tr>
+          <tr><td><code>frontend/dist/</code></td><td>Build output</td></tr>
+          <tr><td><code>__pycache__/</code></td><td>Python bytecode cache</td></tr>
+        </tbody>
+      </table>
+      <div class="note">
+        Use <code>.env.example</code> as the committed template. Each developer copies it to <code>backend/.env</code>.
+      </div>
+    </section>
+
+    <section id="configuration">
+      <h2>6. Configuration Reference</h2>
+      <p>Settings are loaded from <code>backend/.env</code> with the <code>AGENTFORGE_</code> prefix via Pydantic Settings.</p>
+
+      <table>
+        <thead>
+          <tr><th>Variable</th><th>Type</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>AGENTFORGE_HOST</code></td><td>string</td><td><code>127.0.0.1</code></td><td>Backend bind address</td></tr>
+          <tr><td><code>AGENTFORGE_PORT</code></td><td>int</td><td><code>8765</code></td><td>Backend port</td></tr>
+          <tr><td><code>AGENTFORGE_WORKSPACE_ROOT</code></td><td>path</td><td><code>/home/…/Dokumente</code></td><td>File/shell sandbox root</td></tr>
+          <tr><td><code>AGENTFORGE_OLLAMA_BASE_URL</code></td><td>URL</td><td><code>http://localhost:11434</code></td><td>Ollama API base</td></tr>
+          <tr><td><code>AGENTFORGE_DEFAULT_MODEL</code></td><td>string</td><td><code>ollama/llama3.1:8b</code></td><td>Fallback LiteLLM model</td></tr>
+          <tr><td><code>AGENTFORGE_LLM_AUTO_ROUTING</code></td><td>bool</td><td><code>true</code></td><td>Enable task-type routing</td></tr>
+          <tr><td><code>AGENTFORGE_DEFAULT_MEMORY_TOKENS</code></td><td>int</td><td><code>32000</code></td><td>Default memory budget</td></tr>
+          <tr><td><code>AGENTFORGE_UI_LANGUAGE</code></td><td>string</td><td><code>en</code></td><td>UI locale (<code>en</code> or <code>de</code>)</td></tr>
+          <tr><td><code>AGENTFORGE_OPENAI_API_KEY</code></td><td>string</td><td>empty</td><td>OpenAI API key</td></tr>
+          <tr><td><code>AGENTFORGE_OPENAI_API_BASE</code></td><td>string</td><td>empty</td><td>Optional custom OpenAI base URL</td></tr>
+          <tr><td><code>AGENTFORGE_ANTHROPIC_API_KEY</code></td><td>string</td><td>empty</td><td>Anthropic (Claude) key</td></tr>
+          <tr><td><code>AGENTFORGE_GEMINI_API_KEY</code></td><td>string</td><td>empty</td><td>Google Gemini key</td></tr>
+          <tr><td><code>AGENTFORGE_GROQ_API_KEY</code></td><td>string</td><td>empty</td><td>Groq key</td></tr>
+          <tr><td><code>AGENTFORGE_MISTRAL_API_KEY</code></td><td>string</td><td>empty</td><td>Mistral key</td></tr>
+        </tbody>
+      </table>
+
+      <h3>6.1 Model routing (<code>assets/models.yaml</code>)</h3>
+      <p>Defines priority-ordered Ollama model tags per task type. The router picks the first installed match.</p>
+      <table>
+        <thead><tr><th>Task type</th><th>Typical use</th></tr></thead>
+        <tbody>
+          <tr><td><code>coding</code></td><td>Code generation and editing</td></tr>
+          <tr><td><code>code_review</code></td><td>Review and quality analysis</td></tr>
+          <tr><td><code>architecture</code></td><td>System design discussions</td></tr>
+          <tr><td><code>research</code></td><td>Information gathering</td></tr>
+          <tr><td><code>documentation</code></td><td>Technical writing</td></tr>
+          <tr><td><code>coordination</code></td><td>Multi-agent project management</td></tr>
+          <tr><td><code>sql</code></td><td>Database queries</td></tr>
+          <tr><td><code>vision</code></td><td>Image understanding</td></tr>
+          <tr><td><code>finance</code></td><td>Financial analysis models</td></tr>
+          <tr><td><code>general</code></td><td>Fallback conversations</td></tr>
+          <tr><td><code>title</code></td><td>Auto-generated chat titles</td></tr>
+        </tbody>
+      </table>
+
+      <h3>6.2 Memory token options</h3>
+      <p>Supported values (frontend constant): 100, 250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000.</p>
+    </section>
+
+    <section id="api">
+      <h2>7. REST API Reference</h2>
+      <p>Base URL: <code>http://127.0.0.1:8765/api</code></p>
+
+      <h3>7.1 Health &amp; settings</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method get">GET</span></td><td><code>/health</code></td><td>Backend health check</td></tr>
+          <tr><td><span class="method get">GET</span></td><td><code>/settings</code></td><td>Current runtime settings (keys masked)</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/settings</code></td><td>Update settings</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/settings/test-models</code></td><td>Test configured cloud API keys</td></tr>
+        </tbody>
+      </table>
+
+      <h3>7.2 Setup wizard</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method get">GET</span></td><td><code>/setup/status</code></td><td>Wizard progress and test results</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/setup/test</code></td><td>Run environment tests</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/setup/sync-models</code></td><td>Import Ollama models into registry</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/setup/resume</code></td><td>Resume wizard from saved step</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/setup/skip</code></td><td>Skip wizard</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/setup/complete</code></td><td>Mark setup complete</td></tr>
+        </tbody>
+      </table>
+
+      <h3>7.3 Roles</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method get">GET</span></td><td><code>/roles</code></td><td>List built-in and custom roles</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/roles</code></td><td>Create a custom role</td></tr>
+        </tbody>
+      </table>
+
+      <h3>7.4 LLM registry &amp; routing</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method get">GET</span></td><td><code>/llm/models</code></td><td>Available Ollama models</td></tr>
+          <tr><td><span class="method get">GET</span></td><td><code>/llm/routing</code></td><td>Current task → model routing map</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/llm/routing</code></td><td>Update routing assignments</td></tr>
+          <tr><td><span class="method get">GET</span></td><td><code>/llm/catalog</code></td><td>Known model metadata catalog</td></tr>
+          <tr><td><span class="method get">GET</span></td><td><code>/llm/registry</code></td><td>User-managed model registry</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/llm/registry</code></td><td>Add model to registry</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/llm/registry/suggest</code></td><td>Auto-suggest models from Ollama</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/llm/registry/sync</code></td><td>Sync registry with Ollama tags</td></tr>
+          <tr><td><span class="method delete">DEL</span></td><td><code>/llm/registry/{id}</code></td><td>Remove registry entry</td></tr>
+        </tbody>
+      </table>
+
+      <h3>7.5 Chats &amp; messages</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method get">GET</span></td><td><code>/chats</code></td><td>List all chats</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/chats</code></td><td>Create chat (coding or multi-agent)</td></tr>
+          <tr><td><span class="method get">GET</span></td><td><code>/chats/{id}</code></td><td>Get chat metadata</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/chats/{id}</code></td><td>Update chat (title, roles, memory)</td></tr>
+          <tr><td><span class="method delete">DEL</span></td><td><code>/chats/{id}</code></td><td>Delete chat permanently</td></tr>
+          <tr><td><span class="method get">GET</span></td><td><code>/chats/{id}/messages</code></td><td>List messages</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/chats/{id}/messages</code></td><td>Send message (sync response)</td></tr>
+          <tr><td><span class="method get">GET</span></td><td><code>/chats/{id}/memory</code></td><td>Get memory settings</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/chats/{id}/memory</code></td><td>Update memory settings</td></tr>
+        </tbody>
+      </table>
+
+      <h3>7.6 Approvals</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method get">GET</span></td><td><code>/chats/{id}/approvals</code></td><td>Pending shell approvals</td></tr>
+          <tr><td><span class="method post">POST</span></td><td><code>/chats/{id}/approvals/{aid}</code></td><td>Approve or deny command</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="websocket">
+      <h2>8. WebSocket Protocol</h2>
+      <p>Endpoint: <code>WS /api/ws/chats/{chat_id}</code></p>
+
+      <h3>8.1 Client → server</h3>
+      <pre><code>{
+  "content": "Refactor the login module",
+  "mode": "coding",
+  "role_ids": ["developer", "reviewer"]
+}</code></pre>
+
+      <h3>8.2 Server → client events</h3>
+      <table>
+        <thead><tr><th>type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>agent_message</code></td><td>Inter-agent or tool progress message</td></tr>
+          <tr><td><code>approval_required</code></td><td>Shell command needs user approval</td></tr>
+          <tr><td><code>message</code></td><td>Final assistant response</td></tr>
+          <tr><td><code>done</code></td><td>Processing complete</td></tr>
+          <tr><td><code>error</code></td><td>Error with message text</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="agents">
+      <h2>9. Agent System</h2>
+
+      <h3>9.1 Orchestration modes</h3>
+      <table>
+        <thead><tr><th>Mode</th><th>Enum</th><th>Behaviour</th></tr></thead>
+        <tbody>
+          <tr><td>Coding</td><td><code>coding</code></td><td>Single developer agent with full tool access</td></tr>
+          <tr><td>Multi-agent</td><td><code>multi_agent</code></td><td>Selected roles discuss in rounds; PM synthesizes</td></tr>
+        </tbody>
+      </table>
+
+      <h3>9.2 Built-in roles</h3>
+      <p>Defined in <code>agentforge/agents/role_registry.py</code>: developer, reviewer, architect, researcher, documentation, project_manager.</p>
+
+      <h3>9.3 Custom roles</h3>
+      <p>YAML files in <code>assets/roles/</code> are loaded at startup:</p>
+      <pre><code>id: security_expert
+name: Security Expert
+description: Audits code for vulnerabilities
+system_prompt: You are a security specialist...
+is_builtin: false</code></pre>
+
+      <h3>9.4 Tool execution loop</h3>
+      <ul>
+        <li>Maximum <strong>8 tool rounds</strong> in single-agent mode</li>
+        <li>Maximum <strong>4 discussion rounds</strong> in multi-agent mode</li>
+        <li>Unknown tool names trigger a bailout with user-visible error</li>
+        <li>JSON tool calls embedded in text content are parsed as fallback</li>
+      </ul>
+    </section>
+
+    <section id="tools">
+      <h2>10. Agent Tools</h2>
+      <table>
+        <thead><tr><th>Tool</th><th>Name</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>ReadFileTool</td><td><code>read_file</code></td><td>Read text file within workspace (truncated at max_output_chars)</td></tr>
+          <tr><td>WriteFileTool</td><td><code>write_file</code></td><td>Create or overwrite text file</td></tr>
+          <tr><td>ListDirectoryTool</td><td><code>list_directory</code></td><td>List directory contents</td></tr>
+          <tr><td>ShellTool</td><td><code>run_shell</code></td><td>Execute shell command with whitelist/blacklist/approval</td></tr>
+          <tr><td>RememberTool</td><td><code>remember</code></td><td>Store fact in chat or global memory</td></tr>
+        </tbody>
+      </table>
+
+      <div class="warn">
+        All file paths are resolved relative to <code>AGENTFORGE_WORKSPACE_ROOT</code>.
+        Path traversal outside the workspace root is rejected.
+      </div>
+    </section>
+
+    <section id="llm">
+      <h2>11. LLM Layer</h2>
+
+      <h3>11.1 LiteLLM integration</h3>
+      <p>
+        <code>LLMProvider</code> wraps LiteLLM <code>acompletion()</code> with tool schemas.
+        Ollama models use the <code>ollama/</code> prefix; cloud models use provider-specific prefixes.
+      </p>
+
+      <h3>11.2 Supported cloud providers</h3>
+      <table>
+        <thead><tr><th>Provider</th><th>Settings field</th><th>Test model</th></tr></thead>
+        <tbody>
+          <tr><td>OpenAI</td><td><code>openai_api_key</code></td><td><code>gpt-4o-mini</code></td></tr>
+          <tr><td>Anthropic</td><td><code>anthropic_api_key</code></td><td><code>anthropic/claude-3-5-haiku-20241022</code></td></tr>
+          <tr><td>Google Gemini</td><td><code>gemini_api_key</code></td><td><code>gemini/gemini-2.0-flash</code></td></tr>
+          <tr><td>Groq</td><td><code>groq_api_key</code></td><td><code>groq/llama-3.1-8b-instant</code></td></tr>
+          <tr><td>Mistral</td><td><code>mistral_api_key</code></td><td><code>mistral/mistral-small-latest</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>11.3 Model resolution</h3>
+      <ol>
+        <li>If auto-routing is off → use <code>default_model</code></li>
+        <li>Detect task type from user content and active role</li>
+        <li>Look up user registry assignment for that task type</li>
+        <li>Fall back to <code>assets/models.yaml</code> priority list</li>
+        <li>Verify model tag exists in Ollama via exact tag match</li>
+      </ol>
+    </section>
+
+    <section id="memory">
+      <h2>12. Memory System</h2>
+      <p>
+        Memory stores contextual facts the agent can recall across turns.
+        Configurable per chat:
+      </p>
+      <ul>
+        <li><strong>Token budget</strong> — how much memory context to inject</li>
+        <li><strong>Scope</strong> — chat-only or global (shared across chats)</li>
+      </ul>
+      <p>Memory entries are persisted in SQLite alongside chat data.</p>
+    </section>
+
+    <section id="storage">
+      <h2>13. Storage</h2>
+
+      <h3>13.1 Data directory</h3>
+      <p>Default: <code>~/.local/share/agentforge/</code> (configurable via <code>AGENTFORGE_DATA_DIR</code> if exposed)</p>
+
+      <table>
+        <thead><tr><th>File</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td><code>agentforge.db</code></td><td>Chats, messages, memory entries</td></tr>
+          <tr><td><code>model_config.json</code></td><td>User model registry and routing overrides</td></tr>
+          <tr><td><code>setup_state.json</code></td><td>Setup wizard step and test results</td></tr>
+        </tbody>
+      </table>
+
+      <h3>13.2 Runtime files (project directory)</h3>
+      <table>
+        <thead><tr><th>Path</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td><code>.run/backend.pid</code></td><td>Backend process ID</td></tr>
+          <tr><td><code>.run/frontend.pid</code></td><td>Frontend process ID</td></tr>
+          <tr><td><code>.run/logs/*.log</code></td><td>Launcher, backend, frontend logs</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="security">
+      <h2>14. Security Model</h2>
+
+      <h3>14.1 Workspace sandbox</h3>
+      <p>File tools resolve all paths under <code>workspace_root</code>. Escaping paths are blocked.</p>
+
+      <h3>14.2 Shell command policy</h3>
+      <table>
+        <thead><tr><th>Policy</th><th>Default examples</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td>Whitelist</td><td><code>git</code>, <code>npm</code>, <code>python</code>, <code>ls</code>, <code>grep</code></td><td>Auto-execute</td></tr>
+          <tr><td>Blacklist</td><td><code>rm</code>, <code>sudo</code>, <code>curl</code>, <code>ssh</code></td><td>Blocked</td></tr>
+          <tr><td>Unlisted</td><td>Any other command</td><td>User approval required</td></tr>
+        </tbody>
+      </table>
+
+      <h3>14.3 API keys</h3>
+      <p>
+        Keys in <code>backend/.env</code> are local secrets. The settings API returns masked values.
+        Keys entered via the UI are stored in the local SQLite database, not in the repository.
+      </p>
+
+      <h3>14.4 Network</h3>
+      <p>Backend binds to <code>127.0.0.1</code> by default — not exposed to the network unless configured otherwise.</p>
+    </section>
+
+    <section id="frontend">
+      <h2>15. Frontend Architecture</h2>
+
+      <table>
+        <thead><tr><th>Area</th><th>Path</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>Entry</td><td><code>src/App.tsx</code></td><td>Main layout, modals, chat routing</td></tr>
+          <tr><td>Chat</td><td><code>src/components/ChatPanel.tsx</code></td><td>Messages, WebSocket, approvals</td></tr>
+          <tr><td>Sidebar</td><td><code>src/components/Sidebar.tsx</code></td><td>Chat list, gear menu popup</td></tr>
+          <tr><td>Settings</td><td><code>src/components/SettingsModal.tsx</code></td><td>Properties form, cloud keys</td></tr>
+          <tr><td>Setup</td><td><code>src/components/SetupWizard.tsx</code></td><td>First-run wizard</td></tr>
+          <tr><td>API client</td><td><code>src/services/api.ts</code></td><td>REST wrapper</td></tr>
+          <tr><td>i18n</td><td><code>src/i18n/locales/{en,de}.json</code></td><td>UI translations</td></tr>
+          <tr><td>Memory</td><td><code>src/constants/memory.ts</code></td><td>Token budget options</td></tr>
+          <tr><td>ESC hook</td><td><code>src/hooks/useEscapeClose.ts</code></td><td>Close modals without saving</td></tr>
+        </tbody>
+      </table>
+
+      <p>Built with Vite 5, React 18, TypeScript 5. Optional Tauri 2 wrapper in <code>frontend/src-tauri/</code>.</p>
+    </section>
+
+    <section id="launcher">
+      <h2>16. Launcher (<code>run.py</code>)</h2>
+      <p>The launcher script orchestrates all processes:</p>
+      <ol>
+        <li>Optionally prompts for desktop shortcut setup</li>
+        <li>Starts backend if not healthy on port 8765</li>
+        <li>Starts Vite dev server if not healthy on port 5173</li>
+        <li>Opens UI based on <code>AGENTFORGE_MODE</code> env var or auto-detection</li>
+      </ol>
+
+      <table>
+        <thead><tr><th>Mode</th><th>Env value</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Auto (default)</td><td>—</td><td>Tauri binary → Tauri dev → browser window → browser tab</td></tr>
+          <tr><td>Browser tab</td><td><code>browser</code></td><td><code>xdg-open</code> URL</td></tr>
+          <tr><td>App window</td><td><code>window</code></td><td>Chromium/Firefox --app mode</td></tr>
+          <tr><td>Tauri</td><td><code>tauri</code></td><td><code>npm run tauri:dev</code></td></tr>
+        </tbody>
+      </table>
+
+      <p>Stop with <code>python3 stop.py</code> — kills PIDs and frees ports 8765 and 5173.</p>
+    </section>
+
+    <section id="testing">
+      <h2>17. Testing</h2>
+      <pre><code># Unit tests (mocked LLM, no Ollama required)
+python3 run_tests.py
+
+# Include live Ollama integration tests
+python3 run_tests.py --live</code></pre>
+
+      <p>Test suite location: <code>backend/tests/</code></p>
+      <table>
+        <thead><tr><th>Test module</th><th>Coverage</th></tr></thead>
+        <tbody>
+          <tr><td><code>test_api.py</code></td><td>REST endpoints</td></tr>
+          <tr><td><code>test_orchestrator.py</code></td><td>Agent loops, tool bailouts</td></tr>
+          <tr><td><code>test_cloud_providers.py</code></td><td>Cloud provider wiring</td></tr>
+          <tr><td><code>test_model_router.py</code></td><td>Task-type routing</td></tr>
+          <tr><td><code>test_tools.py</code></td><td>File and shell tools</td></tr>
+          <tr><td><code>test_live_ollama.py</code></td><td>Live Ollama inference (optional)</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="file-structure">
+      <h2>18. Complete File Structure</h2>
+      <pre><code>AgentForge/
+├── backend/
+│   ├── agentforge/
+│   │   ├── __init__.py
+│   │   ├── __main__.py
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── agents/
+│   │   │   ├── orchestrator.py
+│   │   │   ├── role_registry.py
+│   │   │   └── approval_manager.py
+│   │   ├── api/routes.py
+│   │   ├── llm/
+│   │   │   ├── provider.py
+│   │   │   ├── model_router.py
+│   │   │   ├── model_catalog.py
+│   │   │   ├── cloud_providers.py
+│   │   │   └── task_types.py
+│   │   ├── tools/registry.py
+│   │   ├── memory/store.py
+│   │   ├── storage/
+│   │   │   ├── conversation_store.py
+│   │   │   ├── model_store.py
+│   │   │   └── setup_store.py
+│   │   ├── services/setup_service.py
+│   │   ├── models/schemas.py
+│   │   └── i18n/{en,de}.json
+│   ├── tests/
+│   ├── requirements.txt
+│   ├── pytest.ini
+│   └── .env                 # local only
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── services/
+│   │   ├── i18n/
+│   │   ├── constants/
+│   │   └── styles/
+│   ├── src-tauri/           # optional native build
+│   ├── package.json
+│   └── vite.config.ts
+├── assets/
+│   ├── roles/
+│   ├── models.yaml
+│   └── models_catalog.json
+├── docs/
+│   ├── USER_MANUAL.md
+│   └── TECHNICAL_DOCUMENTATION.html
+├── scripts/launcher_common.py
+├── install.py
+├── run.py
+├── stop.py
+├── run_tests.py
+├── desktop_setup.py
+├── .env.example
+└── README.md</code></pre>
+    </section>
+
+    <p style="margin-top:3rem; color:var(--muted); font-size:0.9rem;">
+      AgentForge v0.1.0 · MIT License ·
+      <a href="USER_MANUAL.html">User Manual</a>
+    </p>
+  </main>
+</div>
+</body>
+</html>

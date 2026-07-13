@@ -1,0 +1,64 @@
+# AgentForge LLM routing preferences (Ollama model tags)
+# First available model in each list is used (top = highest priority)
+
+tasks:
+  coding:
+    - deepseek-coder:6.7b-instruct-q4_K_M
+    - codellama:34b-instruct-q4_K_M
+    - codellama:13b-instruct-q8_0
+    - codellama:7b-instruct-q8_0
+    - qwen2.5:14b-instruct-q4_K_M
+
+  code_review:
+    - codellama:13b-instruct-q8_0
+    - deepseek-coder:6.7b-instruct-q4_K_M
+    - codellama:7b-instruct-q8_0
+    - qwen2.5:7b-instruct-q8_0
+
+  architecture:
+    - qwen2.5:14b-instruct-q4_K_M
+    - mixtral:8x7b-instruct-q4_K_M
+    - llama3.1:8b
+    - mistral:7b-instruct-q4_K_M
+
+  research:
+    - qwen2.5:7b-instruct-q8_0
+    - gemma2:9b-instruct-q8_0
+    - mistral:7b-instruct-q4_K_M
+    - llama3.1:8b
+
+  documentation:
+    - gemma2:9b-instruct-q8_0
+    - qwen2.5:7b-instruct-q8_0
+    - llama3.2:3b-instruct-q8_0
+    - llama3.1:8b
+
+  coordination:
+    - llama3.1:8b
+    - qwen2.5:7b-instruct-q8_0
+    - mistral:7b-instruct-q4_K_M
+    - gemma2:9b-instruct-q8_0
+
+  sql:
+    - sqlcoder:15b
+    - deepseek-coder:6.7b-instruct-q4_K_M
+    - codellama:13b-instruct-q8_0
+
+  vision:
+    - llama3.2-vision
+    - llava:13b
+
+  finance:
+    - mychen76/Fin-R1:Q5
+    - mychen76/Fin-R1:Q6
+
+  general:
+    - llama3.1:8b
+    - llama3.2:3b-instruct-q8_0
+    - phi3.5:3.8b-mini-instruct-q8_0
+    - qwen2.5:7b-instruct-q8_0
+
+  title:
+    - phi3.5:3.8b-mini-instruct-q4_0
+    - llama3.2:3b-instruct-q8_0
+    - llama3.1:8b

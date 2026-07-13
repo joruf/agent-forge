@@ -1,0 +1,258 @@
+{
+  "version": "1.0",
+  "tasks": {
+    "coding": {
+      "label": "Coding / Entwicklung",
+      "description": "Code schreiben, refactoren, debuggen"
+    },
+    "code_review": {
+      "label": "Code-Review",
+      "description": "Code prüfen, Qualität, Bugs"
+    },
+    "architecture": {
+      "label": "Architektur",
+      "description": "Systemdesign, Module, Schnittstellen"
+    },
+    "research": {
+      "label": "Recherche",
+      "description": "Recherche, Vergleiche, Zusammenfassungen"
+    },
+    "documentation": {
+      "label": "Dokumentation",
+      "description": "Docs, README, technische Texte"
+    },
+    "coordination": {
+      "label": "Koordination",
+      "description": "Projektleitung, Agenten-Steuerung"
+    },
+    "sql": {
+      "label": "SQL / Datenbank",
+      "description": "SQL-Queries, Schema, DB-Design"
+    },
+    "vision": {
+      "label": "Vision / OCR",
+      "description": "Bilder, OCR, Screenshots analysieren"
+    },
+    "finance": {
+      "label": "Finanzen",
+      "description": "Finanzanalyse, Prognosen, Trading"
+    },
+    "general": {
+      "label": "Allgemein",
+      "description": "Allgemeine Aufgaben"
+    },
+    "title": {
+      "label": "Chat-Titel",
+      "description": "Kurze Titel-Generierung"
+    }
+  },
+  "entries": [
+    {
+      "id": "deepseek-coder-6.7b",
+      "patterns": ["deepseek-coder", "deepseek-coder-v2"],
+      "family": "deepseek",
+      "display_name": "DeepSeek Coder 6.7B",
+      "recommended_tasks": ["coding", "sql", "code_review"],
+      "ram_gb": "4-8",
+      "description": "Top für Code-Generierung und technische Aufgaben"
+    },
+    {
+      "id": "codellama-7b",
+      "patterns": ["codellama:7b", "codellama:7b-instruct"],
+      "family": "codellama",
+      "display_name": "Code Llama 7B",
+      "recommended_tasks": ["coding", "code_review"],
+      "ram_gb": "7-10",
+      "description": "Kompaktes Code-Modell"
+    },
+    {
+      "id": "codellama-13b",
+      "patterns": ["codellama:13b", "codellama:13b-instruct"],
+      "family": "codellama",
+      "display_name": "Code Llama 13B",
+      "recommended_tasks": ["coding", "code_review", "architecture"],
+      "ram_gb": "13-16",
+      "description": "Starkes Code-Modell für komplexere Projekte"
+    },
+    {
+      "id": "codellama-34b",
+      "patterns": ["codellama:34b", "codellama:34b-instruct"],
+      "family": "codellama",
+      "display_name": "Code Llama 34B",
+      "recommended_tasks": ["coding", "architecture", "code_review"],
+      "ram_gb": "20-24",
+      "description": "Großes Code-Modell, q4 quantisiert empfohlen"
+    },
+    {
+      "id": "sqlcoder-15b",
+      "patterns": ["sqlcoder"],
+      "family": "sqlcoder",
+      "display_name": "SQLCoder 15B",
+      "recommended_tasks": ["sql"],
+      "ram_gb": "12-16",
+      "description": "Spezialisiert auf SQL und Datenbankabfragen"
+    },
+    {
+      "id": "llama3.1-8b",
+      "patterns": ["llama3.1:8b", "llama3.1", "llama3:8b"],
+      "family": "llama",
+      "display_name": "Llama 3.1 8B",
+      "recommended_tasks": ["general", "coordination", "architecture", "documentation"],
+      "ram_gb": "4-8",
+      "description": "Sehr gute Allround-Performance auf CPU"
+    },
+    {
+      "id": "llama3.2-3b",
+      "patterns": ["llama3.2:3b", "llama3.2:3b-instruct"],
+      "family": "llama",
+      "display_name": "Llama 3.2 3B Instruct",
+      "recommended_tasks": ["general", "title", "documentation"],
+      "ram_gb": "3-4",
+      "description": "Sehr effizient, gut für schnelle Antworten"
+    },
+    {
+      "id": "llama3.2-11b",
+      "patterns": ["llama3.2:11b", "llama3.2-vision"],
+      "family": "llama",
+      "display_name": "Llama 3.2 11B / Vision",
+      "recommended_tasks": ["general", "vision", "research"],
+      "ram_gb": "8-12",
+      "description": "Vision-Variante für Bilder und OCR"
+    },
+    {
+      "id": "llama2-7b",
+      "patterns": ["llama2:7b", "llama2"],
+      "family": "llama",
+      "display_name": "Llama 2 7B",
+      "recommended_tasks": ["general"],
+      "ram_gb": "8-10",
+      "description": "Schnell und ressourcenschonend"
+    },
+    {
+      "id": "llama2-13b",
+      "patterns": ["llama2:13b"],
+      "family": "llama",
+      "display_name": "Llama 2 13B",
+      "recommended_tasks": ["general", "research"],
+      "ram_gb": "10-20",
+      "description": "Solides Modell mit 64 GB RAM gut machbar"
+    },
+    {
+      "id": "llama3.1-70b",
+      "patterns": ["llama3.1:70b"],
+      "family": "llama",
+      "display_name": "Llama 3.1 70B",
+      "recommended_tasks": ["architecture", "research", "coordination"],
+      "ram_gb": "40+",
+      "description": "Sehr leistungsfähig, q4 und Geduld auf CPU nötig"
+    },
+    {
+      "id": "mistral-7b",
+      "patterns": ["mistral:7b", "mistral:7b-instruct", "open-mistral"],
+      "family": "mistral",
+      "display_name": "Mistral 7B",
+      "recommended_tasks": ["general", "research", "coordination"],
+      "ram_gb": "5-8",
+      "description": "Effizientes europäisches Allround-Modell"
+    },
+    {
+      "id": "mistral-nemo-12b",
+      "patterns": ["mistral-nemo", "nemo-12b"],
+      "family": "mistral",
+      "display_name": "Mistral Nemo 12B",
+      "recommended_tasks": ["research", "architecture", "documentation"],
+      "ram_gb": "8-12",
+      "description": "Größere Mistral-Variante für komplexere Aufgaben"
+    },
+    {
+      "id": "mixtral-8x7b",
+      "patterns": ["mixtral"],
+      "family": "mixtral",
+      "display_name": "Mixtral 8x7B",
+      "recommended_tasks": ["architecture", "research", "coordination"],
+      "ram_gb": "26+",
+      "description": "MoE-Architektur, stark für komplexe Aufgaben"
+    },
+    {
+      "id": "qwen2.5-7b",
+      "patterns": ["qwen2.5:7b", "qwen2.5-7b"],
+      "family": "qwen",
+      "display_name": "Qwen 2.5 7B Instruct",
+      "recommended_tasks": ["research", "documentation", "general", "coordination"],
+      "ram_gb": "5-8",
+      "description": "Sehr gut für Recherche und Texte"
+    },
+    {
+      "id": "qwen2.5-14b",
+      "patterns": ["qwen2.5:14b", "qwen2.5-14b"],
+      "family": "qwen",
+      "display_name": "Qwen 2.5 14B",
+      "recommended_tasks": ["architecture", "research", "coding"],
+      "ram_gb": "10-16",
+      "description": "Größere Qwen-Version für anspruchsvolle Aufgaben"
+    },
+    {
+      "id": "gemma2-9b",
+      "patterns": ["gemma2:9b", "gemma2"],
+      "family": "gemma",
+      "display_name": "Google Gemma 2 9B",
+      "recommended_tasks": ["documentation", "research", "general"],
+      "ram_gb": "6-9",
+      "description": "Gutes Modell für Dokumentation und Texte"
+    },
+    {
+      "id": "gemma3-12b",
+      "patterns": ["gemma3:12b", "gemma3"],
+      "family": "gemma",
+      "display_name": "Google Gemma 3 12B",
+      "recommended_tasks": ["documentation", "research", "architecture"],
+      "ram_gb": "13-16",
+      "description": "Neuere Gemma-Generation"
+    },
+    {
+      "id": "gemma3-27b",
+      "patterns": ["gemma3:27b", "tiger-gemma"],
+      "family": "gemma",
+      "display_name": "Gemma / Tiger Gemma 27B",
+      "recommended_tasks": ["research", "architecture", "general"],
+      "ram_gb": "30+",
+      "description": "Großes Gemma-Modell, hohe Qualität"
+    },
+    {
+      "id": "phi3.5-mini",
+      "patterns": ["phi3.5", "phi3"],
+      "family": "phi",
+      "display_name": "Microsoft Phi 3.5 Mini",
+      "recommended_tasks": ["general", "title"],
+      "ram_gb": "3-5",
+      "description": "Sehr schnelles Turbo-Modell"
+    },
+    {
+      "id": "llava-13b",
+      "patterns": ["llava"],
+      "family": "llava",
+      "display_name": "LLaVA 13B",
+      "recommended_tasks": ["vision"],
+      "ram_gb": "10-14",
+      "description": "Bildanalyse und Beschreibung"
+    },
+    {
+      "id": "fin-r1",
+      "patterns": ["fin-r1", "mychen76/fin-r1"],
+      "family": "finance",
+      "display_name": "Fin-R1 Finanzmodell",
+      "recommended_tasks": ["finance"],
+      "ram_gb": "5-30",
+      "description": "Finanzreasoning und Prognosen"
+    },
+    {
+      "id": "gpt-4",
+      "patterns": ["gpt-4", "gpt-4o", "gpt-4-turbo"],
+      "family": "openai",
+      "display_name": "OpenAI GPT-4",
+      "recommended_tasks": ["general", "coding", "architecture", "research"],
+      "ram_gb": "cloud",
+      "description": "Cloud-API via OpenAI"
+    }
+  ]
+}

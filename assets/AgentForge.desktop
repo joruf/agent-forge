@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=AgentForge
+Comment=Multi-agent AI platform for coding and collaboration
+Icon=assets/icon.svg
+Exec=python3 run.py
+Path=
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true

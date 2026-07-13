@@ -1,0 +1,237 @@
+{
+  "app": {
+    "title": "AgentForge",
+    "backendOffline": "Backend is not reachable.",
+    "startHint": "Start AgentForge:",
+    "reconnect": "Reconnect",
+    "sidebarResize": "Adjust menu width"
+  },
+  "sidebar": {
+    "settings": "Settings",
+    "menu": "Menu",
+    "openMenu": "Open menu",
+    "properties": "Properties",
+    "newSingleAgent": "+ Single Agent",
+    "newMultiAgent": "+ Multi-Agent",
+    "newQuickChat": "+ Quick Chat",
+    "quickChatTooltip": "Fast chat without tools — ideal for simple questions, explanations, and everyday conversation.",
+    "singleAgentTooltip": "One agent with roles, tools, and workspace access — ideal for coding, debugging, and focused development work.",
+    "multiAgentTooltip": "Several agents discuss your request together — ideal for planning, reviews, architecture, and complex decisions.",
+    "deleteChat": "Delete chat",
+    "renameChat": "Edit chat title",
+    "renameChatHint": "Double-click to edit",
+    "chatRunning": "Agents are working…",
+    "chatCompleted": "All agents finished",
+    "resumeSetup": "Resume setup",
+    "manageModels": "Manage models",
+    "about": "About AgentForge",
+    "userManual": "User manual",
+    "footerNav": "Help and tools"
+  },
+  "chat": {
+    "empty": "Select a chat or create a new one.",
+    "newChatTitle": "New Chat",
+    "multiAgent": "Multi-Agent",
+    "singleAgent": "Single Agent",
+    "quickChat": "Quick Chat",
+    "quickAssistant": "Assistant",
+    "quickChatDescription": "Fast chat without tools — ideal for simple questions.",
+    "agentWorkingQuick": "Reply is streaming…",
+    "autoRole": "Auto",
+    "autoRoleDescription": "Detects the topic and switches to the best matching agent automatically.",
+    "selectRole": "Role",
+    "executionStrategy": "Execution",
+    "executionStrategyAuto": "Auto",
+    "executionStrategySerial": "Serial",
+    "executionStrategyParallel": "Parallel",
+    "executionStrategyHybrid": "Hybrid",
+    "memory": "Memory",
+    "memoryPerChat": "Per chat",
+    "memoryGlobal": "Global",
+    "you": "You",
+    "assistant": "Assistant",
+    "agentWorking": "Agent is working…",
+    "agentWorkingMulti": "Agents are discussing — you can join in at any time.",
+    "agentFailed": "The agent stopped responding. Please try again.",
+    "agentTimeout": "The request took too long. Try a smaller model or lower memory.",
+    "tryAgain": "Try again",
+    "resend": "Resend",
+    "copyMessage": "Copy message",
+    "stop": "Stop",
+    "inputPlaceholderActive": "Continue the discussion… (Enter to send, Shift+Enter or Ctrl+Enter for new line)",
+    "inputPlaceholder": "Enter a message… (Enter to send, Shift+Enter or Ctrl+Enter for new line)",
+    "inputPlaceholderQuick": "Ask anything… (Enter to send, Shift+Enter or Ctrl+Enter for new line)",
+    "inputPlaceholderMultiActive": "Join the discussion… (Enter to send, Shift+Enter or Ctrl+Enter for new line)",
+    "send": "Send"
+  },
+  "settings": {
+    "title": "Settings",
+    "workspaceRoot": "Workspace directory",
+    "ollamaUrl": "Ollama URL (remote)",
+    "defaultModel": "Default model (fallback)",
+    "autoRouting": "Automatic model routing (coding, research, SQL, …)",
+    "openaiKey": "OpenAI API key",
+    "anthropicKey": "Anthropic API key (Claude)",
+    "geminiKey": "Google Gemini API key",
+    "groqKey": "Groq API key",
+    "mistralKey": "Mistral API key",
+    "cloudProviders": "Cloud providers",
+    "cloudProvidersHint": "Optional API keys for OpenAI, Claude, Gemini, Groq, and Mistral. Use LiteLLM model IDs as default model, e.g. anthropic/claude-3-5-haiku-20241022.",
+    "defaultModelHint": "ollama/llama3.1:8b, gpt-4o-mini, anthropic/claude-3-5-haiku-20241022, gemini/gemini-2.0-flash",
+    "memoryTokens": "Memory (tokens)",
+    "appearance": "Appearance",
+    "darkMode": "Dark mode",
+    "lightMode": "Light mode",
+    "language": "Language",
+    "manageModelsRouting": "Manage models & routing",
+    "modelsHint": "{{models}} models, {{installed}} on Ollama",
+    "availableRoles": "Available roles ({{count}})",
+    "cancel": "Cancel",
+    "save": "Save",
+    "modelAccess": "Model access",
+    "modelAccessHint": "Check whether Ollama is reachable and your configured models are available.",
+    "testModels": "Test model access",
+    "testingModels": "Testing…",
+    "testInference": "Run short inference test (may take up to 2 minutes)"
+  },
+  "about": {
+    "title": "About AgentForge",
+    "lead": "Multi-agent AI platform for coding, collaboration, and structured tasks.",
+    "version": "Version",
+    "developer": "Developer",
+    "company": "Company",
+    "note": "AgentForge supports single-agent coding and multi-agent workflows with configurable memory, roles, and human-in-the-loop approvals.",
+    "manualHint": "See the user manual for setup, daily use, and troubleshooting.",
+    "openManual": "Open user manual",
+    "close": "Close"
+  },
+  "approval": {
+    "title": "Approvals required",
+    "approve": "Allow",
+    "deny": "Deny"
+  },
+  "agentHistory": {
+    "empty": "No agent discussions yet.",
+    "title": "Agent history",
+    "team": "team",
+    "running": "Running",
+    "working": "Agent is working…",
+    "waiting": "Waiting for agent responses…"
+  },
+  "expandable": {
+    "showMore": "Show more",
+    "showLess": "Show less"
+  },
+  "memory": {
+    "tokens": "{{value}} tokens"
+  },
+  "tasks": {
+    "coding": "Coding / Development",
+    "code_review": "Code review",
+    "architecture": "Architecture",
+    "research": "Research",
+    "documentation": "Documentation",
+    "coordination": "Coordination",
+    "sql": "SQL",
+    "vision": "Vision/OCR",
+    "finance": "Finance",
+    "general": "General",
+    "title": "Chat title"
+  },
+  "models": {
+    "title": "Model management",
+    "lead": "Add models, assign tasks, and configure routing per task.",
+    "addSection": "Add model",
+    "tagPlaceholder": "e.g. deepseek-coder:6.7b-instruct-q4_K_M",
+    "suggest": "Suggest",
+    "add": "Add",
+    "importOllama": "Import from Ollama",
+    "recommendedFor": "Recommended for:",
+    "ram": "RAM: ~{{gb}} GB",
+    "availableModels": "Available models ({{count}})",
+    "noModels": "No models yet — import from Ollama or add manually.",
+    "edit": "Edit",
+    "delete": "Delete",
+    "routingSection": "Routing per task",
+    "autoOption": "Automatic ({{model}})",
+    "displayName": "Display name",
+    "notes": "Notes",
+    "close": "Close"
+  },
+  "setup": {
+    "title": "AgentForge Setup",
+    "stepOf": "Step {{current}} of {{total}}: {{label}}",
+    "skip": "Skip",
+    "stepsAria": "Setup steps",
+    "back": "Back",
+    "next": "Continue",
+    "finish": "Launch AgentForge",
+    "steps": {
+      "welcome": "Welcome",
+      "ollama": "Ollama",
+      "models": "Models",
+      "openai": "OpenAI",
+      "workspace": "Workspace",
+      "verify": "Verification",
+      "complete": "Done"
+    },
+    "welcome": {
+      "title": "Welcome to AgentForge",
+      "intro": "This setup wizard checks whether Ollama is reachable, models are available, API keys work, and the workspace is configured correctly.",
+      "checkOllama": "Ollama server and installed models",
+      "checkRegistry": "Model registry and routing",
+      "checkOpenai": "Optional: OpenAI API key",
+      "checkWorkspace": "Workspace (read/write access)",
+      "checkInference": "Model inference test",
+      "hint": "You can skip at any time and resume later via \"Resume setup\" in the sidebar."
+    },
+    "ollama": {
+      "title": "Ollama server",
+      "intro": "Enter the URL of your Ollama server (local or remote/NAS).",
+      "baseUrl": "Ollama base URL",
+      "test": "Test connection"
+    },
+    "models": {
+      "title": "Import models",
+      "intro": "Import installed Ollama models into the AgentForge registry. You can then assign the right model per task.",
+      "import": "Import models from Ollama",
+      "imported": "{{count}} model(s) imported ({{total}} total)",
+      "upToDate": "No new models — registry is up to date"
+    },
+    "openai": {
+      "title": "OpenAI API (optional)",
+      "intro": "Optionally enter an OpenAI API key if you want to use cloud models. Without a key, this step is skipped.",
+      "apiKey": "OpenAI API key",
+      "alreadySet": "•••••••• (already set)",
+      "test": "Test API key"
+    },
+    "workspace": {
+      "title": "Workspace",
+      "intro": "AgentForge works in this directory. It must exist and be writable.",
+      "path": "Workspace path",
+      "test": "Test directory"
+    },
+    "verify": {
+      "title": "Full verification",
+      "intro": "All required components are checked, including a short model inference test.",
+      "runAll": "Run all tests",
+      "optionalHints": " ({{count}} optional notes)"
+    },
+    "complete": {
+      "title": "Setup complete",
+      "intro": "AgentForge is configured. You can adjust settings anytime under Settings or Manage models.",
+      "allPassed": "All required tests passed."
+    },
+    "errors": {
+      "testFailed": "Test failed",
+      "requiredFailed": "Not all required tests passed. Please check your settings.",
+      "actionFailed": "Action failed",
+      "importFailed": "Import failed"
+    }
+  },
+  "common": {
+    "close": "Close",
+    "save": "Save",
+    "cancel": "Cancel"
+  }
+}

@@ -1,0 +1,237 @@
+{
+  "app": {
+    "title": "AgentForge",
+    "backendOffline": "Backend nicht erreichbar.",
+    "startHint": "Starte AgentForge:",
+    "reconnect": "Erneut verbinden",
+    "sidebarResize": "Menübreite anpassen"
+  },
+  "sidebar": {
+    "settings": "Einstellungen",
+    "menu": "Menü",
+    "openMenu": "Menü öffnen",
+    "properties": "Eigenschaften",
+    "newSingleAgent": "+ Single Agent",
+    "newMultiAgent": "+ Multi-Agent",
+    "newQuickChat": "+ Quick Chat",
+    "quickChatTooltip": "Schneller Chat ohne Tools — ideal für einfache Fragen, Erklärungen und Smalltalk.",
+    "singleAgentTooltip": "Ein Agent mit Rollen, Tools und Workspace-Zugriff — ideal für Coding, Debugging und fokussierte Entwicklung.",
+    "multiAgentTooltip": "Mehrere Agenten diskutieren gemeinsam — ideal für Planung, Reviews, Architektur und komplexe Entscheidungen.",
+    "deleteChat": "Chat löschen",
+    "renameChat": "Chat-Titel bearbeiten",
+    "renameChatHint": "Doppelklick zum Bearbeiten",
+    "chatRunning": "Agenten arbeiten…",
+    "chatCompleted": "Alle Agenten fertig",
+    "resumeSetup": "Einrichtung fortsetzen",
+    "manageModels": "Modelle verwalten",
+    "about": "Über AgentForge",
+    "userManual": "Bedienungsanleitung",
+    "footerNav": "Hilfe und Werkzeuge"
+  },
+  "chat": {
+    "empty": "Wähle einen Chat oder erstelle einen neuen.",
+    "newChatTitle": "Neuer Chat",
+    "multiAgent": "Multi-Agent",
+    "singleAgent": "Single Agent",
+    "quickChat": "Quick Chat",
+    "quickAssistant": "Assistent",
+    "quickChatDescription": "Schneller Chat ohne Tools — ideal für einfache Fragen.",
+    "agentWorkingQuick": "Antwort wird gestreamt…",
+    "autoRole": "Auto",
+    "autoRoleDescription": "Erkennt das Thema und wechselt automatisch zum passenden Agenten.",
+    "selectRole": "Rolle",
+    "executionStrategy": "Ausführung",
+    "executionStrategyAuto": "Auto",
+    "executionStrategySerial": "Seriell",
+    "executionStrategyParallel": "Parallel",
+    "executionStrategyHybrid": "Hybrid",
+    "memory": "Gedächtnis",
+    "memoryPerChat": "Pro Chat",
+    "memoryGlobal": "Global",
+    "you": "Du",
+    "assistant": "Assistent",
+    "agentWorking": "Agent arbeitet…",
+    "agentWorkingMulti": "Agenten diskutieren — du kannst jederzeit einsteigen.",
+    "agentFailed": "Der Agent hat nicht mehr geantwortet. Bitte erneut versuchen.",
+    "agentTimeout": "Die Anfrage hat zu lange gedauert. Probiere ein kleineres Modell oder weniger Gedächtnis.",
+    "tryAgain": "Erneut versuchen",
+    "resend": "Erneut senden",
+    "copyMessage": "Nachricht kopieren",
+    "stop": "Stopp",
+    "inputPlaceholderActive": "Diskussion fortsetzen… (Enter senden, Shift+Enter oder Strg+Enter neue Zeile)",
+    "inputPlaceholder": "Nachricht eingeben… (Enter senden, Shift+Enter oder Strg+Enter neue Zeile)",
+    "inputPlaceholderQuick": "Frag einfach los… (Enter senden, Shift+Enter oder Strg+Enter neue Zeile)",
+    "inputPlaceholderMultiActive": "In die Diskussion einsteigen… (Enter senden, Shift+Enter oder Strg+Enter neue Zeile)",
+    "send": "Senden"
+  },
+  "settings": {
+    "title": "Einstellungen",
+    "workspaceRoot": "Arbeitsverzeichnis",
+    "ollamaUrl": "Ollama URL (remote)",
+    "defaultModel": "Standard-Modell (Fallback)",
+    "autoRouting": "Automatisches Modell-Routing (Coding, Research, SQL, …)",
+    "openaiKey": "OpenAI API-Key",
+    "anthropicKey": "Anthropic API-Key (Claude)",
+    "geminiKey": "Google Gemini API-Key",
+    "groqKey": "Groq API-Key",
+    "mistralKey": "Mistral API-Key",
+    "cloudProviders": "Cloud-Anbieter",
+    "cloudProvidersHint": "Optionale API-Keys für OpenAI, Claude, Gemini, Groq und Mistral. Als Standard-Modell LiteLLM-IDs verwenden, z. B. anthropic/claude-3-5-haiku-20241022.",
+    "defaultModelHint": "ollama/llama3.1:8b, gpt-4o-mini, anthropic/claude-3-5-haiku-20241022, gemini/gemini-2.0-flash",
+    "memoryTokens": "Gedächtnis (Tokens)",
+    "appearance": "Erscheinungsbild",
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode",
+    "language": "Sprache",
+    "manageModelsRouting": "Modelle & Routing verwalten",
+    "modelsHint": "{{models}} Modelle, {{installed}} auf Ollama",
+    "availableRoles": "Verfügbare Rollen ({{count}})",
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "modelAccess": "Modell-Zugriff",
+    "modelAccessHint": "Prüft, ob Ollama erreichbar ist und die konfigurierten Modelle verfügbar sind.",
+    "testModels": "Modell-Zugriff testen",
+    "testingModels": "Teste…",
+    "testInference": "Kurzen Inferenz-Test ausführen (kann bis zu 2 Minuten dauern)"
+  },
+  "about": {
+    "title": "Über AgentForge",
+    "lead": "Multi-Agent KI-Plattform für Coding, Zusammenarbeit und strukturierte Aufgaben.",
+    "version": "Version",
+    "developer": "Entwickler",
+    "company": "Firma",
+    "note": "AgentForge unterstützt Single-Agent-Coding und Multi-Agent-Workflows mit konfigurierbarem Gedächtnis, Rollen und Human-in-the-Loop-Freigaben.",
+    "manualHint": "Die Bedienungsanleitung enthält Setup, tägliche Nutzung und Fehlerbehebung.",
+    "openManual": "Bedienungsanleitung öffnen",
+    "close": "Schließen"
+  },
+  "approval": {
+    "title": "Freigaben erforderlich",
+    "approve": "Erlauben",
+    "deny": "Ablehnen"
+  },
+  "agentHistory": {
+    "empty": "Keine Agent-Diskussionen.",
+    "title": "Agent-Verlauf",
+    "team": "Team",
+    "running": "Aktiv",
+    "working": "Agent arbeitet…",
+    "waiting": "Warte auf Agent-Antworten…"
+  },
+  "expandable": {
+    "showMore": "Mehr anzeigen",
+    "showLess": "Weniger anzeigen"
+  },
+  "memory": {
+    "tokens": "{{value}} Tokens"
+  },
+  "tasks": {
+    "coding": "Coding / Entwicklung",
+    "code_review": "Code-Review",
+    "architecture": "Architektur",
+    "research": "Recherche",
+    "documentation": "Dokumentation",
+    "coordination": "Koordination",
+    "sql": "SQL",
+    "vision": "Vision/OCR",
+    "finance": "Finanzen",
+    "general": "Allgemein",
+    "title": "Chat-Titel"
+  },
+  "models": {
+    "title": "Modell-Verwaltung",
+    "lead": "Modelle hinzufügen, Aufgaben zuweisen und Routing pro Aufgabe festlegen.",
+    "addSection": "Modell hinzufügen",
+    "tagPlaceholder": "z.B. deepseek-coder:6.7b-instruct-q4_K_M",
+    "suggest": "Vorschlagen",
+    "add": "Hinzufügen",
+    "importOllama": "Von Ollama importieren",
+    "recommendedFor": "Empfohlen für:",
+    "ram": "RAM: ~{{gb}} GB",
+    "availableModels": "Verfügbare Modelle ({{count}})",
+    "noModels": "Noch keine Modelle — importiere von Ollama oder füge manuell hinzu.",
+    "edit": "Bearbeiten",
+    "delete": "Löschen",
+    "routingSection": "Routing pro Aufgabe",
+    "autoOption": "Automatisch ({{model}})",
+    "displayName": "Anzeigename",
+    "notes": "Notizen",
+    "close": "Schließen"
+  },
+  "setup": {
+    "title": "AgentForge Einrichtung",
+    "stepOf": "Schritt {{current}} von {{total}}: {{label}}",
+    "skip": "Überspringen",
+    "stepsAria": "Einrichtungsschritte",
+    "back": "Zurück",
+    "next": "Weiter",
+    "finish": "AgentForge starten",
+    "steps": {
+      "welcome": "Willkommen",
+      "ollama": "Ollama",
+      "models": "Modelle",
+      "openai": "OpenAI",
+      "workspace": "Arbeitsverzeichnis",
+      "verify": "Prüfung",
+      "complete": "Fertig"
+    },
+    "welcome": {
+      "title": "Willkommen bei AgentForge",
+      "intro": "Diese Einrichtungsroutine prüft, ob Ollama erreichbar ist, Modelle verfügbar sind, API-Keys funktionieren und das Arbeitsverzeichnis korrekt konfiguriert ist.",
+      "checkOllama": "Ollama-Server und installierte Modelle",
+      "checkRegistry": "Modell-Registry und Routing",
+      "checkOpenai": "Optional: OpenAI API-Key",
+      "checkWorkspace": "Arbeitsverzeichnis (Lesen/Schreiben)",
+      "checkInference": "Modell-Inferenz-Test",
+      "hint": "Du kannst jederzeit überspringen und die Einrichtung später unter „Einrichtung fortsetzen“ in der Seitenleiste wieder aufnehmen."
+    },
+    "ollama": {
+      "title": "Ollama-Server",
+      "intro": "Gib die URL deines Ollama-Servers ein (lokal oder remote/NAS).",
+      "baseUrl": "Ollama Base URL",
+      "test": "Verbindung testen"
+    },
+    "models": {
+      "title": "Modelle importieren",
+      "intro": "Importiere installierte Ollama-Modelle in die AgentForge-Registry. Danach kannst du pro Aufgabe das passende Modell zuweisen.",
+      "import": "Modelle von Ollama importieren",
+      "imported": "{{count}} Modell(e) importiert ({{total}} gesamt)",
+      "upToDate": "Keine neuen Modelle — Registry ist aktuell"
+    },
+    "openai": {
+      "title": "OpenAI API (optional)",
+      "intro": "Optional: Trage einen OpenAI API-Key ein, falls du Cloud-Modelle nutzen möchtest. Ohne Key wird dieser Schritt übersprungen.",
+      "apiKey": "OpenAI API Key",
+      "alreadySet": "•••••••• (bereits gesetzt)",
+      "test": "API-Key testen"
+    },
+    "workspace": {
+      "title": "Arbeitsverzeichnis",
+      "intro": "AgentForge arbeitet in diesem Verzeichnis. Es muss existieren und beschreibbar sein.",
+      "path": "Workspace-Pfad",
+      "test": "Verzeichnis testen"
+    },
+    "verify": {
+      "title": "Gesamtprüfung",
+      "intro": "Alle Pflicht-Komponenten werden geprüft, inklusive eines kurzen Modell-Inferenz-Tests.",
+      "runAll": "Alle Tests ausführen",
+      "optionalHints": " ({{count}} optionale Hinweise)"
+    },
+    "complete": {
+      "title": "Einrichtung abgeschlossen",
+      "intro": "AgentForge ist eingerichtet. Du kannst jederzeit unter Einstellungen oder „Modelle verwalten“ Anpassungen vornehmen.",
+      "allPassed": "Alle Pflicht-Tests wurden bestanden."
+    },
+    "errors": {
+      "testFailed": "Test fehlgeschlagen",
+      "requiredFailed": "Nicht alle Pflicht-Tests bestanden. Bitte Einstellungen prüfen.",
+      "actionFailed": "Aktion fehlgeschlagen",
+      "importFailed": "Import fehlgeschlagen"
+    }
+  },
+  "common": {
+    "close": "Schließen",
+    "save": "Speichern",
+    "cancel": "Abbrechen"
+  }
+}

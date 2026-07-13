@@ -1,0 +1,98 @@
+{
+  "setup": {
+    "backend_ok": "Backend is running",
+    "ollama_ok": "{{count}} model(s) at {{url}}",
+    "ollama_empty": "Reachable at {{url}}, but no models installed",
+    "ollama_fail": "Not reachable: {{url}} — {{error}}",
+    "openai_skipped": "No API key configured (optional)",
+    "openai_ok": "API key valid — response: {{response}}",
+    "openai_fail": "API key test failed: {{error}}",
+    "cloud_skipped": "No {{provider}} API key configured (optional)",
+    "cloud_ok": "{{provider}} API key valid — response: {{response}}",
+    "cloud_fail": "{{provider}} API key test failed: {{error}}",
+    "workspace_missing": "Directory does not exist: {{path}}",
+    "workspace_not_dir": "Not a directory: {{path}}",
+    "workspace_ok": "Readable and writable: {{path}}",
+    "workspace_fail": "Not writable: {{path}} — {{error}}",
+    "generate_skip_ollama": "Ollama not reachable — inference test skipped",
+    "generate_skip_models": "No models available for testing",
+    "generate_ok": "Model {{model}} responded: {{response}}",
+    "generate_fail": "Model {{model}} — error: {{error}}",
+    "registry_ok": "{{count}} active model(s) in registry",
+    "registry_empty": "No models in registry yet — import from Ollama",
+    "summary_ok": "All required tests passed",
+    "summary_fail": "Some required tests failed",
+    "labels": {
+      "backend": "AgentForge Backend",
+      "ollama": "Ollama Server",
+      "openai": "OpenAI API",
+      "anthropic": "Anthropic (Claude)",
+      "gemini": "Google Gemini",
+      "groq": "Groq",
+      "mistral": "Mistral AI",
+      "workspace": "Workspace",
+      "model_registry": "Model Registry",
+      "ollama_generate": "Model Inference"
+    }
+  },
+  "tasks": {
+    "coding": { "label": "Coding / Development", "description": "Write, refactor, and debug code" },
+    "code_review": { "label": "Code review", "description": "Review code quality and bugs" },
+    "architecture": { "label": "Architecture", "description": "System design, modules, interfaces" },
+    "research": { "label": "Research", "description": "Research, comparisons, summaries" },
+    "documentation": { "label": "Documentation", "description": "Docs, README, technical writing" },
+    "coordination": { "label": "Coordination", "description": "Project management, agent orchestration" },
+    "sql": { "label": "SQL / Database", "description": "SQL queries, schema, DB design" },
+    "vision": { "label": "Vision / OCR", "description": "Analyze images, OCR, screenshots" },
+    "finance": { "label": "Finance", "description": "Financial analysis, forecasts, trading" },
+    "general": { "label": "General", "description": "General tasks" },
+    "title": { "label": "Chat title", "description": "Short title generation" }
+  },
+  "roles": {
+    "developer": { "name": "Developer", "description": "Writes, edits, and refactors code in the workspace." },
+    "reviewer": { "name": "Reviewer", "description": "Reviews code quality, bugs, and best practices." },
+    "architect": { "name": "Architect", "description": "Plans system structure, modules, and interfaces." },
+    "researcher": { "name": "Researcher", "description": "Researches topics and summarizes findings." },
+    "documentation": { "name": "Documentation", "description": "Creates and maintains documentation and technical writing." },
+    "project_manager": { "name": "Project Manager", "description": "Coordinates agents, involves the user when needed, delivers results." },
+    "software_tester": { "name": "Software Tester", "description": "Designs test cases, runs tests, and reports quality issues." },
+    "security": { "name": "Security Engineer", "description": "Reviews code and architecture for security vulnerabilities." },
+    "devops": { "name": "DevOps Engineer", "description": "Handles CI/CD, deployment scripts, and infrastructure automation." }
+  },
+  "catalog": {
+    "auto_detected": "Auto-detected — please verify"
+  },
+  "tools": {
+    "execute_command": "Execute command: {{command}}",
+    "approval_required": "Command '{{command}}' requires user approval"
+  },
+  "errors": {
+    "chat_not_found": "Chat not found",
+    "model_exists": "Model already exists: {{tag}}",
+    "model_not_found": "Model {{id}} not found",
+    "unknown_task": "Unknown task: {{task}}",
+    "unknown_step": "Unknown step: {{step}}"
+  },
+  "settings_test": {
+    "default_model_skip": "Default model is not an Ollama model — check skipped",
+    "default_model_ok": "Default model {{model}} is installed on Ollama",
+    "default_model_missing": "Default model {{model}} is not installed on Ollama",
+    "default_model_cloud_ok": "Default model {{model}} uses {{provider}} (API key configured)",
+    "default_model_cloud_missing_key": "Default model {{model}} requires a {{provider}} API key",
+    "cloud_inference_skip": "Default model is not a cloud model — inference test skipped",
+    "cloud_inference_no_key": "Default model {{model}} requires a {{provider}} API key",
+    "cloud_inference_ok": "Cloud model {{model}} responded: {{response}}",
+    "cloud_inference_fail": "Cloud model {{model}} — error: {{error}}",
+    "registry_skip": "No models in registry — import from Ollama first",
+    "registry_all_ok": "All {{count}} registry model(s) are available on Ollama",
+    "registry_missing": "{{missing}} of {{total}} registry model(s) missing on Ollama: {{models}}",
+    "summary_ok": "Model access OK — all checks passed",
+    "summary_partial": "Ollama reachable — some optional checks need attention",
+    "summary_fail": "Cannot reach Ollama or models are unavailable",
+    "labels": {
+      "default_model": "Default model",
+      "registry_ollama": "Registry vs Ollama",
+      "cloud_inference": "Cloud inference"
+    }
+  }
+}

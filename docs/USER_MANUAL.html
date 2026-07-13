@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentForge — User Manual</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface2: #243044;
+      --text: #e7ecf3;
+      --muted: #9aa8bc;
+      --accent: #4f9cf9;
+      --accent2: #6ee7b7;
+      --border: #2d3a4f;
+      --code-bg: #121820;
+      --warn: #fbbf24;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 16px;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      min-height: 100vh;
+    }
+    nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 1.5rem 1rem;
+    }
+    nav h2 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin: 1.25rem 0 0.5rem;
+    }
+    nav h2:first-child { margin-top: 0; }
+    nav ul { list-style: none; padding: 0; margin: 0; }
+    nav li { margin: 0.2rem 0; }
+    nav a {
+      display: block;
+      padding: 0.35rem 0.6rem;
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    nav a:hover { background: var(--surface2); color: var(--text); text-decoration: none; }
+    main {
+      max-width: 960px;
+      padding: 2.5rem 3rem 4rem;
+    }
+    h1 {
+      font-size: 2.2rem;
+      margin: 0 0 0.5rem;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .subtitle { color: var(--muted); margin-bottom: 2rem; }
+    h2 {
+      font-size: 1.55rem;
+      margin: 2.5rem 0 1rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+    h3 { font-size: 1.15rem; margin: 1.75rem 0 0.75rem; color: var(--accent2); }
+    h4 { font-size: 1rem; margin: 1.25rem 0 0.5rem; }
+    p { margin: 0.75rem 0; }
+    ul, ol { margin: 0.75rem 0; padding-left: 1.5rem; }
+    li { margin: 0.3rem 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.92rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.55rem 0.75rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--surface2); font-weight: 600; }
+    tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    code {
+      font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+      font-size: 0.88em;
+      background: var(--code-bg);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    pre code { background: none; border: none; padding: 0; }
+    .badge {
+      display: inline-block;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.2rem 0.65rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-right: 0.4rem;
+    }
+    .diagram {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      font-family: monospace;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .note {
+      background: rgba(79, 156, 249, 0.1);
+      border-left: 3px solid var(--accent);
+      padding: 0.85rem 1rem;
+      border-radius: 0 6px 6px 0;
+      margin: 1rem 0;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+      main { padding: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <nav>
+    <h2>User Manual</h2>
+    <ul>
+      <li><a href="#overview">1. Overview</a></li>
+      <li><a href="#requirements">2. Requirements</a></li>
+      <li><a href="#installation">3. Installation</a></li>
+      <li><a href="#setup-wizard">4. Setup Wizard</a></li>
+      <li><a href="#starting-stopping">5. Start &amp; Stop</a></li>
+      <li><a href="#user-interface">6. User Interface</a></li>
+      <li><a href="#working-modes">7. Working Modes</a></li>
+      <li><a href="#chats">8. Chats &amp; Messaging</a></li>
+      <li><a href="#memory">9. Memory Settings</a></li>
+      <li><a href="#settings">10. Settings</a></li>
+      <li><a href="#models">11. Model Management</a></li>
+      <li><a href="#shell">12. Shell Commands</a></li>
+      <li><a href="#remote-ollama">13. Remote Ollama</a></li>
+      <li><a href="#cloud-llm">14. Cloud LLM (Optional)</a></li>
+      <li><a href="#language">15. Language</a></li>
+      <li><a href="#troubleshooting">16. Troubleshooting</a></li>
+      <li><a href="#privacy">17. Data &amp; Privacy</a></li>
+      <li><a href="#quick-reference">Quick Reference</a></li>
+    </ul>
+    <h2>More docs</h2>
+    <ul>
+      <li><a href="../README.md">README</a></li>
+      <li><a href="TECHNICAL_DOCUMENTATION.html">Technical Documentation</a></li>
+    </ul>
+  </nav>
+
+  <main>
+    <h1>AgentForge User Manual</h1>
+    <p class="subtitle">
+      <span class="badge">v0.1.0</span>
+      <span class="badge">Joachim Ruf · Loresoft</span>
+    </p>
+    <p>
+      This manual describes how to install, configure, and use AgentForge on Linux.
+      AgentForge is a multi-agent AI desktop platform for coding tasks and collaborative
+      workflows, with support for local Ollama models and optional cloud LLM providers.
+    </p>
+
+    <section id="overview">
+      <h2>1. Overview</h2>
+      <p>AgentForge combines:</p>
+      <ul>
+        <li><strong>Single-agent coding mode</strong> — one AI assistant reads, writes, and refactors files in your workspace.</li>
+        <li><strong>Multi-agent mode</strong> — several specialized roles (Developer, Reviewer, Architect, etc.) collaborate on a task. You see their internal discussion in the agent history panel.</li>
+        <li><strong>Human-in-the-loop</strong> — shell commands outside a safe whitelist require your explicit approval.</li>
+        <li><strong>Configurable memory</strong> — conversation context is stored per chat or globally, with adjustable token limits.</li>
+        <li><strong>Model routing</strong> — different models can be assigned to different task types (coding, SQL, research, etc.).</li>
+      </ul>
+      <p>The application consists of:</p>
+      <table>
+        <thead><tr><th>Component</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td>Python backend (FastAPI)</td><td>API, agents, tools, storage</td></tr>
+          <tr><td>React frontend</td><td>Chat UI, settings, setup wizard</td></tr>
+          <tr><td>Ollama (local or remote)</td><td>LLM inference</td></tr>
+          <tr><td>SQLite database</td><td>Chats, messages, memory</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="requirements">
+      <h2>2. Requirements</h2>
+      <ul>
+        <li><strong>OS:</strong> Linux (desktop)</li>
+        <li><strong>Python:</strong> 3.12+</li>
+        <li><strong>Node.js:</strong> 20+ (for frontend build/dev)</li>
+        <li><strong>Ollama:</strong> reachable via HTTP (local or network)</li>
+        <li><strong>RAM:</strong> depends on models; 16 GB+ recommended for medium models; 64 GB allows larger models</li>
+        <li><strong>Workspace:</strong> a directory AgentForge can read and write (default: your Documents folder)</li>
+      </ul>
+      <p><strong>Optional:</strong></p>
+      <ul>
+        <li>Cloud API keys (OpenAI, Anthropic, Gemini, Groq, Mistral)</li>
+        <li>Chromium (opened automatically in app mode if Tauri is not used)</li>
+      </ul>
+    </section>
+
+    <section id="installation">
+      <h2>3. Installation</h2>
+      <h3>From GitHub</h3>
+      <pre><code>git clone https://github.com/YOUR_USERNAME/AgentForge.git
+cd AgentForge
+python3 install.py
+cp .env.example backend/.env</code></pre>
+
+      <p>The installer:</p>
+      <ol>
+        <li>Creates a Python virtual environment in <code>backend/.venv</code></li>
+        <li>Installs Python dependencies</li>
+        <li>Installs frontend npm packages</li>
+        <li>Creates a Linux desktop shortcut</li>
+      </ol>
+
+      <h3>Configure environment</h3>
+      <p>Edit <code>backend/.env</code>:</p>
+      <pre><code>AGENTFORGE_OLLAMA_BASE_URL=http://192.168.1.10:11434
+AGENTFORGE_DEFAULT_MODEL=ollama/llama3.1:8b
+AGENTFORGE_WORKSPACE_ROOT=/home/youruser/Documents
+AGENTFORGE_LLM_AUTO_ROUTING=true
+AGENTFORGE_UI_LANGUAGE=en</code></pre>
+
+      <table>
+        <thead><tr><th>Variable</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>AGENTFORGE_OLLAMA_BASE_URL</code></td><td>URL of your Ollama server</td></tr>
+          <tr><td><code>AGENTFORGE_DEFAULT_MODEL</code></td><td>Fallback LiteLLM model string</td></tr>
+          <tr><td><code>AGENTFORGE_WORKSPACE_ROOT</code></td><td>Root directory for file tools</td></tr>
+          <tr><td><code>AGENTFORGE_LLM_AUTO_ROUTING</code></td><td>Auto-select model by task type</td></tr>
+          <tr><td><code>AGENTFORGE_UI_LANGUAGE</code></td><td>UI language: <code>en</code> or <code>de</code> (default: <code>en</code>)</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="setup-wizard">
+      <h2>4. First Run — Setup Wizard</h2>
+      <p>On first start, AgentForge shows a <strong>setup wizard</strong> that verifies your environment.</p>
+
+      <h3>Steps</h3>
+      <table>
+        <thead><tr><th>Step</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>Welcome</td><td>Overview of checks</td></tr>
+          <tr><td>Ollama</td><td>Enter server URL and test connectivity</td></tr>
+          <tr><td>Models</td><td>Import installed Ollama models into the registry</td></tr>
+          <tr><td>Cloud providers</td><td>Optional API key tests</td></tr>
+          <tr><td>Workspace</td><td>Verify directory exists and is writable</td></tr>
+          <tr><td>Verification</td><td>Run all tests including a short inference call</td></tr>
+          <tr><td>Complete</td><td>Finish setup</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Skip and resume</h3>
+      <ul>
+        <li>Click <strong>Skip</strong> at any time to use the app immediately.</li>
+        <li>Later, choose <strong>Resume setup</strong> in the sidebar gear menu to continue where you left off.</li>
+        <li>Progress is stored in <code>~/.local/share/agentforge/setup_state.json</code>.</li>
+      </ul>
+
+      <h3>Required vs optional tests</h3>
+      <p><strong>Required:</strong> backend, Ollama reachability, workspace write access.</p>
+      <p><strong>Optional:</strong> cloud API keys, model registry entries, inference test (warnings if models are missing).</p>
+    </section>
+
+    <section id="starting-stopping">
+      <h2>5. Starting and Stopping</h2>
+      <h3>Start</h3>
+      <pre><code>python3 run.py</code></pre>
+      <p>This starts the backend (port 8765) and the frontend (port 5173), then opens a desktop window.</p>
+
+      <h3>Stop</h3>
+      <pre><code>python3 stop.py</code></pre>
+      <p>Or close the application window and press <kbd>Ctrl</kbd>+<kbd>C</kbd> in the terminal if you started it in the foreground.</p>
+
+      <h3>Start modes</h3>
+      <table>
+        <thead><tr><th>Command</th><th>Behaviour</th></tr></thead>
+        <tbody>
+          <tr><td><code>python3 run.py</code></td><td>Default: Chromium/Firefox app window</td></tr>
+          <tr><td><code>AGENTFORGE_MODE=browser python3 run.py</code></td><td>Open in default browser tab</td></tr>
+          <tr><td><code>AGENTFORGE_MODE=tauri python3 run.py</code></td><td>Native Tauri app</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Backend not reachable</h3>
+      <p>If the UI shows <em>Backend is not reachable</em>:</p>
+      <ol>
+        <li>Ensure <code>python3 run.py</code> is running</li>
+        <li>Check that port 8765 is free</li>
+        <li>Click <strong>Reconnect</strong></li>
+      </ol>
+    </section>
+
+    <section id="user-interface">
+      <h2>6. User Interface</h2>
+      <div class="diagram">┌─────────────────┬──────────────────────────────────────────┐
+│ Sidebar         │ Chat panel                               │
+│                 │  ┌─────────────────────────────────────┐ │
+│ + Coding        │  │ Messages                            │ │
+│ + Multi-Agent   │  │                                     │ │
+│ Chat list       │  └─────────────────────────────────────┘ │
+│                 │  [Input area]              [Send]        │
+│ Settings ⚙      │                                          │
+│ Footer links    │  (Multi-agent: Agent history on right)   │
+└─────────────────┴──────────────────────────────────────────┘</div>
+
+      <h3>Sidebar</h3>
+      <ul>
+        <li><strong>+ Coding</strong> — new single-agent chat</li>
+        <li><strong>+ Multi-Agent</strong> — new multi-role chat</li>
+        <li>Chat list with delete (×) button</li>
+        <li><strong>Settings</strong> (gear icon in footer) — opens a popup with Properties, User manual, Manage models, About</li>
+        <li><strong>Resume setup</strong> (if setup was skipped)</li>
+      </ul>
+
+      <h3>Resizing</h3>
+      <p>Drag the vertical bar between sidebar and chat to adjust sidebar width (220–520 px). Width is saved automatically.</p>
+
+      <h3>Theme</h3>
+      <p>In <strong>Settings → Appearance</strong>, choose Dark mode or Light mode.</p>
+
+      <h3>Keyboard shortcuts</h3>
+      <ul>
+        <li><kbd>Esc</kbd> — close Settings, About, Manage models, or Setup wizard without saving</li>
+        <li><kbd>Enter</kbd> — send message</li>
+        <li><kbd>Shift</kbd>+<kbd>Enter</kbd> — new line in input</li>
+      </ul>
+    </section>
+
+    <section id="working-modes">
+      <h2>7. Working Modes</h2>
+      <h3>Coding (single-agent)</h3>
+      <p>Best for:</p>
+      <ul>
+        <li>Writing or editing code</li>
+        <li>Reading and explaining files</li>
+        <li>Running whitelisted shell commands</li>
+        <li>Focused tasks with one assistant</li>
+      </ul>
+      <p>The agent uses tools: <code>read_file</code>, <code>write_file</code>, <code>list_directory</code>, <code>run_shell</code>, etc.</p>
+
+      <h3>Multi-Agent</h3>
+      <p>Best for:</p>
+      <ul>
+        <li>Larger tasks needing design, implementation, and review</li>
+        <li>Structured collaboration between roles</li>
+      </ul>
+      <p>Default roles in a new multi-agent chat:</p>
+      <ul>
+        <li>Project Manager</li>
+        <li>Developer</li>
+        <li>Reviewer</li>
+      </ul>
+      <p>Enable/disable roles via checkboxes in the chat header before sending a message.</p>
+      <p><strong>Agent history</strong> (right panel) shows inter-agent messages in real time during processing.</p>
+    </section>
+
+    <section id="chats">
+      <h2>8. Chats and Messaging</h2>
+      <h3>Sending messages</h3>
+      <ul>
+        <li>Type in the input area at the bottom</li>
+        <li><strong>Enter</strong> — send</li>
+        <li><strong>Shift+Enter</strong> — new line</li>
+      </ul>
+      <p>While the agent works, an <em>Agent is working…</em> indicator is shown.</p>
+
+      <h3>Chat title</h3>
+      <p>Titles are generated automatically from the first exchange when possible.</p>
+
+      <h3>Deleting chats</h3>
+      <p>Click <strong>×</strong> next to a chat in the sidebar. Deletion is permanent.</p>
+    </section>
+
+    <section id="memory">
+      <h2>9. Memory Settings</h2>
+      <p>Each chat has memory controls in the header:</p>
+      <table>
+        <thead><tr><th>Setting</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Memory (tokens)</strong></td><td>How much context the agent retains (100 – 128 000)</td></tr>
+          <tr><td><strong>Per chat / Global</strong></td><td>Scope of stored memory</td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li><strong>Per chat</strong> — memory applies only to this conversation</li>
+        <li><strong>Global</strong> — shared context across chats (use carefully)</li>
+      </ul>
+      <p>Default memory for new chats is set in <strong>Settings → Memory (tokens)</strong>.</p>
+      <p>Higher token values improve long-context tasks but increase RAM use and latency.</p>
+    </section>
+
+    <section id="settings">
+      <h2>10. Settings</h2>
+      <p>Open via the gear icon in the sidebar footer → <strong>Properties</strong>.</p>
+      <table>
+        <thead><tr><th>Field</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>Language</td><td>English or Deutsch</td></tr>
+          <tr><td>Workspace directory</td><td>Root path for all file operations</td></tr>
+          <tr><td>Ollama URL</td><td>Base URL of Ollama server</td></tr>
+          <tr><td>Default model</td><td>Fallback when routing finds no match</td></tr>
+          <tr><td>Auto routing</td><td>Pick model by detected task type</td></tr>
+          <tr><td>Cloud API keys</td><td>Optional: OpenAI, Anthropic, Gemini, Groq, Mistral</td></tr>
+          <tr><td>Memory (tokens)</td><td>Default for new chats</td></tr>
+          <tr><td>Appearance</td><td>Dark / Light theme</td></tr>
+        </tbody>
+      </table>
+      <p>Click <strong>Save</strong> to apply. Most settings apply immediately to the running backend.</p>
+      <p><strong>Manage models</strong> (gear menu) opens the model manager (see next section).</p>
+      <div class="note">Press <kbd>Esc</kbd> or click <strong>Cancel</strong> to close Settings without saving changes.</div>
+    </section>
+
+    <section id="models">
+      <h2>11. Model Management and Routing</h2>
+      <p>Open via <strong>Manage models</strong> in the sidebar gear menu or settings.</p>
+
+      <h3>Add models</h3>
+      <ol>
+        <li>Enter an Ollama tag (e.g. <code>deepseek-coder:6.7b-instruct-q4_K_M</code>)</li>
+        <li>Click <strong>Suggest</strong> for catalog-based recommendations</li>
+        <li>Click <strong>Add</strong></li>
+        <li>Or click <strong>Import from Ollama</strong> to import all installed models</li>
+      </ol>
+
+      <h3>Assign tasks</h3>
+      <p>Each model card has task checkboxes:</p>
+      <table>
+        <thead><tr><th>Task</th><th>Typical use</th></tr></thead>
+        <tbody>
+          <tr><td>Coding</td><td>Code generation, refactoring</td></tr>
+          <tr><td>Code review</td><td>Quality checks</td></tr>
+          <tr><td>Architecture</td><td>System design</td></tr>
+          <tr><td>Research</td><td>Information gathering</td></tr>
+          <tr><td>Documentation</td><td>Docs and README</td></tr>
+          <tr><td>Coordination</td><td>Multi-agent leadership</td></tr>
+          <tr><td>SQL</td><td>Database queries</td></tr>
+          <tr><td>Vision/OCR</td><td>Image analysis</td></tr>
+          <tr><td>Finance</td><td>Financial analysis</td></tr>
+          <tr><td>General</td><td>Fallback tasks</td></tr>
+          <tr><td>Chat title</td><td>Short title generation</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Routing per task</h3>
+      <p>The <strong>Routing per task</strong> table lets you override which model handles each task:</p>
+      <ul>
+        <li><strong>Automatic</strong> — uses routing rules and assigned tasks</li>
+        <li><strong>Specific model</strong> — always use that model for the task</li>
+      </ul>
+      <p>Enable <strong>Automatic model routing</strong> in Settings for task detection from message content.</p>
+
+      <h3>Recommended models</h3>
+      <p><strong>CPU-focused (fast):</strong></p>
+      <ul>
+        <li><code>qwen2.5:0.5b-instruct</code> — very fast, lightweight</li>
+        <li><code>llama3.2:1b-instruct-q4_K_M</code> — fast with better quality</li>
+      </ul>
+      <p><strong>CPU with ~64 GB RAM:</strong></p>
+      <ul>
+        <li><code>deepseek-coder:6.7b</code> — coding</li>
+        <li><code>codellama:13b</code> — stronger coding</li>
+        <li><code>llama3.1:8b</code> — general</li>
+        <li><code>qwen2.5:7b</code> — general / research</li>
+        <li><code>sqlcoder</code> — SQL tasks</li>
+      </ul>
+      <p>Pull models on your Ollama host:</p>
+      <pre><code>ollama pull deepseek-coder:6.7b-instruct-q4_K_M
+ollama pull qwen2.5:0.5b-instruct</code></pre>
+    </section>
+
+    <section id="shell">
+      <h2>12. Shell Commands and Approvals</h2>
+      <p>Agents can run shell commands in your workspace via <code>run_shell</code>.</p>
+
+      <h3>Whitelist (auto-approved)</h3>
+      <p>Examples: <code>ls</code>, <code>cat</code>, <code>grep</code>, <code>git</code>, <code>python3</code>, <code>npm</code>, <code>mkdir</code>, <code>echo</code></p>
+
+      <h3>Blacklist (blocked)</h3>
+      <p>Examples: <code>rm</code>, <code>sudo</code>, <code>curl</code>, <code>wget</code>, <code>ssh</code>, <code>dd</code></p>
+
+      <h3>Approval required</h3>
+      <p>Any command not on the whitelist triggers an <strong>Approvals required</strong> panel:</p>
+      <ul>
+        <li><strong>Allow</strong> — run the command</li>
+        <li><strong>Deny</strong> — reject; agent receives an error message</li>
+      </ul>
+      <p>Review the full command string before approving.</p>
+    </section>
+
+    <section id="remote-ollama">
+      <h2>13. Remote Ollama (NAS / Docker)</h2>
+      <p>AgentForge works with Ollama on another machine.</p>
+
+      <h3>Docker example</h3>
+      <p>On your NAS/server:</p>
+      <pre><code>docker run -d -v ollama:/root/.ollama -p 11434:11434 --name ollama ollama/ollama
+docker exec -it ollama ollama pull llama3.1:8b</code></pre>
+
+      <h3>AgentForge configuration</h3>
+      <p>Set in <code>backend/.env</code> or Settings:</p>
+      <pre><code>AGENTFORGE_OLLAMA_BASE_URL=http://192.168.1.10:11434</code></pre>
+      <p>Use the LAN IP of the Ollama host, not <code>localhost</code>, when AgentForge runs on a different machine.</p>
+
+      <h3>Verify</h3>
+      <p>In the setup wizard or terminal:</p>
+      <pre><code>curl http://192.168.1.10:11434/api/tags</code></pre>
+      <p>You should see a JSON list of installed models.</p>
+    </section>
+
+    <section id="cloud-llm">
+      <h2>14. Cloud LLM Providers (Optional)</h2>
+      <p>To use cloud models alongside Ollama:</p>
+      <ol>
+        <li>Obtain API keys from the respective provider</li>
+        <li>Enter them in <strong>Settings → Cloud providers</strong> or the setup wizard</li>
+        <li>Assign cloud models in routing if needed</li>
+      </ol>
+
+      <table>
+        <thead><tr><th>Provider</th><th>Example model</th><th>Settings field</th></tr></thead>
+        <tbody>
+          <tr><td>OpenAI</td><td><code>gpt-4o-mini</code></td><td>OpenAI API key</td></tr>
+          <tr><td>Anthropic</td><td><code>anthropic/claude-3-5-haiku-20241022</code></td><td>Anthropic API key</td></tr>
+          <tr><td>Google Gemini</td><td><code>gemini/gemini-2.0-flash</code></td><td>Gemini API key</td></tr>
+          <tr><td>Groq</td><td><code>groq/llama-3.1-8b-instant</code></td><td>Groq API key</td></tr>
+          <tr><td>Mistral</td><td><code>mistral/mistral-small-latest</code></td><td>Mistral API key</td></tr>
+        </tbody>
+      </table>
+      <p>Without keys, cloud-related setup tests are skipped. Ollama remains the primary local provider.</p>
+    </section>
+
+    <section id="language">
+      <h2>15. Language (English / German)</h2>
+      <p>AgentForge supports <strong>English</strong> (default) and <strong>German</strong>.</p>
+
+      <h3>Change language</h3>
+      <ol>
+        <li>Open <strong>Settings</strong> (gear menu → Properties)</li>
+        <li>Select <strong>Language</strong> → English or Deutsch</li>
+        <li>The UI updates immediately; backend messages follow the selected language</li>
+      </ol>
+
+      <p>Language is stored in:</p>
+      <ul>
+        <li>Browser <code>localStorage</code> (instant UI)</li>
+        <li>Backend runtime setting <code>ui_language</code></li>
+        <li>Optional: <code>AGENTFORGE_UI_LANGUAGE</code> in <code>backend/.env</code> at startup</li>
+      </ul>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>16. Troubleshooting</h2>
+
+      <h3>Ollama not reachable</h3>
+      <table>
+        <thead><tr><th>Symptom</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td>Connection refused</td><td>Start Ollama; check URL and firewall</td></tr>
+          <tr><td>Wrong URL</td><td>Fix <code>AGENTFORGE_OLLAMA_BASE_URL</code></td></tr>
+          <tr><td>No models</td><td>Run <code>ollama pull &lt;model&gt;</code> on the server</td></tr>
+        </tbody>
+      </table>
+
+      <h3>LLM error in chat</h3>
+      <p>Messages like <code>LLM error: ...</code> mean the model call failed. Check Ollama logs, model name, and available RAM.</p>
+
+      <h3>Agent hangs on "Agent is working…"</h3>
+      <p>Large models on CPU-only hosts can be very slow. Try a smaller model (e.g. <code>qwen2.5:0.5b-instruct</code>) or check backend logs in <code>.run/logs/backend.log</code>.</p>
+
+      <h3>Workspace errors</h3>
+      <p>Ensure the workspace path exists and your user has read/write permissions.</p>
+
+      <h3>Port conflicts</h3>
+      <p><code>run.py</code> attempts to free ports 8765 and 5173. If problems persist:</p>
+      <pre><code>python3 stop.py
+fuser -k 8765/tcp 5173/tcp
+python3 run.py</code></pre>
+
+      <h3>Setup wizard keeps appearing</h3>
+      <p>Complete all steps and click <strong>Launch AgentForge</strong>, or finish via <strong>Resume setup</strong>.</p>
+      <p>To reset setup:</p>
+      <pre><code>rm ~/.local/share/agentforge/setup_state.json</code></pre>
+
+      <h3>Tests pass but chat fails</h3>
+      <p>Routing may point to a model not loaded in Ollama. Open <strong>Manage models</strong>, verify tags match <code>ollama list</code> output, and run a test in the setup wizard.</p>
+    </section>
+
+    <section id="privacy">
+      <h2>17. Data and Privacy</h2>
+      <p>AgentForge stores data locally:</p>
+      <table>
+        <thead><tr><th>Path</th><th>Content</th></tr></thead>
+        <tbody>
+          <tr><td><code>~/.local/share/agentforge/agentforge.db</code></td><td>Chats, messages, memory</td></tr>
+          <tr><td><code>~/.local/share/agentforge/model_config.json</code></td><td>Models and routing</td></tr>
+          <tr><td><code>~/.local/share/agentforge/setup_state.json</code></td><td>Setup wizard progress</td></tr>
+        </tbody>
+      </table>
+      <p>File operations are restricted to <strong>workspace_root</strong>. Paths outside the workspace are rejected.</p>
+      <p>LLM requests go to your configured Ollama server and/or cloud providers — no third-party analytics are built into AgentForge.</p>
+    </section>
+
+    <section id="quick-reference">
+      <h2>Quick Reference</h2>
+      <table>
+        <thead><tr><th>Action</th><th>How</th></tr></thead>
+        <tbody>
+          <tr><td>Start app</td><td><code>python3 run.py</code></td></tr>
+          <tr><td>Stop app</td><td><code>python3 stop.py</code></td></tr>
+          <tr><td>New coding chat</td><td>Sidebar → + Coding</td></tr>
+          <tr><td>New multi-agent chat</td><td>Sidebar → + Multi-Agent</td></tr>
+          <tr><td>Settings</td><td>Sidebar gear → Properties</td></tr>
+          <tr><td>Models</td><td>Sidebar gear → Manage models</td></tr>
+          <tr><td>User manual</td><td>Sidebar gear → User manual</td></tr>
+          <tr><td>Change language</td><td>Settings → Language</td></tr>
+          <tr><td>Approve shell cmd</td><td>Allow in approval panel</td></tr>
+          <tr><td>Resume setup</td><td>Sidebar → Resume setup</td></tr>
+          <tr><td>Close modal without saving</td><td><kbd>Esc</kbd> or Cancel</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <p style="margin-top:3rem; color:var(--muted); font-size:0.9rem;">
+      AgentForge v0.1.0 · Loresoft · Joachim Ruf ·
+      <a href="TECHNICAL_DOCUMENTATION.html">Technical Documentation</a> ·
+      <a href="../README.md">README</a>
+    </p>
+  </main>
+</div>
+</body>
+</html>

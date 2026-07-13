@@ -1,0 +1,98 @@
+{
+  "setup": {
+    "backend_ok": "Backend läuft",
+    "ollama_ok": "{{count}} Modell(e) unter {{url}}",
+    "ollama_empty": "Erreichbar unter {{url}}, aber keine Modelle installiert",
+    "ollama_fail": "Nicht erreichbar: {{url}} — {{error}}",
+    "openai_skipped": "Kein API-Key konfiguriert (optional)",
+    "openai_ok": "API-Key gültig — Antwort: {{response}}",
+    "openai_fail": "API-Key Test fehlgeschlagen: {{error}}",
+    "cloud_skipped": "Kein {{provider}} API-Key konfiguriert (optional)",
+    "cloud_ok": "{{provider}} API-Key gültig — Antwort: {{response}}",
+    "cloud_fail": "{{provider}} API-Key Test fehlgeschlagen: {{error}}",
+    "workspace_missing": "Verzeichnis existiert nicht: {{path}}",
+    "workspace_not_dir": "Kein Verzeichnis: {{path}}",
+    "workspace_ok": "Lesbar und beschreibbar: {{path}}",
+    "workspace_fail": "Nicht beschreibbar: {{path}} — {{error}}",
+    "generate_skip_ollama": "Ollama nicht erreichbar — Inferenz-Test übersprungen",
+    "generate_skip_models": "Keine Modelle zum Testen vorhanden",
+    "generate_ok": "Modell {{model}} antwortet: {{response}}",
+    "generate_fail": "Modell {{model}} — Fehler: {{error}}",
+    "registry_ok": "{{count}} aktive(s) Modell(e) in der Registry",
+    "registry_empty": "Noch keine Modelle in der Registry — importiere von Ollama",
+    "summary_ok": "Alle Pflicht-Tests bestanden",
+    "summary_fail": "Einige Pflicht-Tests fehlgeschlagen",
+    "labels": {
+      "backend": "AgentForge Backend",
+      "ollama": "Ollama Server",
+      "openai": "OpenAI API",
+      "anthropic": "Anthropic (Claude)",
+      "gemini": "Google Gemini",
+      "groq": "Groq",
+      "mistral": "Mistral AI",
+      "workspace": "Arbeitsverzeichnis",
+      "model_registry": "Modell-Registry",
+      "ollama_generate": "Modell-Inferenz"
+    }
+  },
+  "tasks": {
+    "coding": { "label": "Coding / Entwicklung", "description": "Code schreiben, refactoren, debuggen" },
+    "code_review": { "label": "Code-Review", "description": "Code prüfen, Qualität, Bugs" },
+    "architecture": { "label": "Architektur", "description": "Systemdesign, Module, Schnittstellen" },
+    "research": { "label": "Recherche", "description": "Recherche, Vergleiche, Zusammenfassungen" },
+    "documentation": { "label": "Dokumentation", "description": "Docs, README, technische Texte" },
+    "coordination": { "label": "Koordination", "description": "Projektleitung, Agenten-Steuerung" },
+    "sql": { "label": "SQL / Datenbank", "description": "SQL-Queries, Schema, DB-Design" },
+    "vision": { "label": "Vision / OCR", "description": "Bilder, OCR, Screenshots analysieren" },
+    "finance": { "label": "Finanzen", "description": "Finanzanalyse, Prognosen, Trading" },
+    "general": { "label": "Allgemein", "description": "Allgemeine Aufgaben" },
+    "title": { "label": "Chat-Titel", "description": "Kurze Titel-Generierung" }
+  },
+  "roles": {
+    "developer": { "name": "Entwickler", "description": "Schreibt, bearbeitet und refaktoriert Code im Arbeitsverzeichnis." },
+    "reviewer": { "name": "Reviewer", "description": "Prüft Codequalität, Bugs und Best Practices." },
+    "architect": { "name": "Architekt", "description": "Plant Systemstruktur, Module und Schnittstellen." },
+    "researcher": { "name": "Rechercheur", "description": "Recherchiert Themen und fasst Erkenntnisse zusammen." },
+    "documentation": { "name": "Dokumentation", "description": "Erstellt und pflegt Dokumentation und technische Texte." },
+    "project_manager": { "name": "Projektleiter", "description": "Koordiniert Agenten, bindet den Nutzer ein und liefert Ergebnisse." },
+    "software_tester": { "name": "Software-Tester", "description": "Entwirft Testfälle, führt Tests aus und meldet Qualitätsprobleme." },
+    "security": { "name": "Security Engineer", "description": "Prüft Code und Architektur auf Sicherheitslücken." },
+    "devops": { "name": "DevOps Engineer", "description": "CI/CD, Deployment-Skripte und Infrastruktur-Automatisierung." }
+  },
+  "catalog": {
+    "auto_detected": "Automatisch erkannt — bitte prüfen"
+  },
+  "tools": {
+    "execute_command": "Befehl ausführen: {{command}}",
+    "approval_required": "Befehl '{{command}}' erfordert Nutzerfreigabe"
+  },
+  "errors": {
+    "chat_not_found": "Chat nicht gefunden",
+    "model_exists": "Modell existiert bereits: {{tag}}",
+    "model_not_found": "Modell {{id}} nicht gefunden",
+    "unknown_task": "Unbekannte Aufgabe: {{task}}",
+    "unknown_step": "Unbekannter Schritt: {{step}}"
+  },
+  "settings_test": {
+    "default_model_skip": "Standard-Modell ist kein Ollama-Modell — Prüfung übersprungen",
+    "default_model_ok": "Standard-Modell {{model}} ist auf Ollama installiert",
+    "default_model_missing": "Standard-Modell {{model}} ist auf Ollama nicht installiert",
+    "default_model_cloud_ok": "Standard-Modell {{model}} nutzt {{provider}} (API-Key konfiguriert)",
+    "default_model_cloud_missing_key": "Standard-Modell {{model}} benötigt einen {{provider}} API-Key",
+    "cloud_inference_skip": "Standard-Modell ist kein Cloud-Modell — Inferenz-Test übersprungen",
+    "cloud_inference_no_key": "Standard-Modell {{model}} benötigt einen {{provider}} API-Key",
+    "cloud_inference_ok": "Cloud-Modell {{model}} antwortet: {{response}}",
+    "cloud_inference_fail": "Cloud-Modell {{model}} — Fehler: {{error}}",
+    "registry_skip": "Keine Modelle in der Registry — zuerst von Ollama importieren",
+    "registry_all_ok": "Alle {{count}} Registry-Modell(e) sind auf Ollama verfügbar",
+    "registry_missing": "{{missing}} von {{total}} Registry-Modell(en) fehlen auf Ollama: {{models}}",
+    "summary_ok": "Modell-Zugriff OK — alle Prüfungen bestanden",
+    "summary_partial": "Ollama erreichbar — einige optionale Prüfungen benötigen Aufmerksamkeit",
+    "summary_fail": "Ollama nicht erreichbar oder Modelle nicht verfügbar",
+    "labels": {
+      "default_model": "Standard-Modell",
+      "registry_ollama": "Registry vs Ollama",
+      "cloud_inference": "Cloud-Inferenz"
+    }
+  }
+}

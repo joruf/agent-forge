@@ -1,0 +1,28 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 20010904//EN"
+  "http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd">
+<svg width="512" height="512">
+<g style="fill:black;fill-opacity:1;stroke:none;stroke-width:1;stroke-opacity:1;fill-rule:nonzero;">
+<g style="fill:#0f1117;">
+  <rect x="0" y="0" width="128" height="128" rx="24" ry="24"/>
+</g>
+<g style="fill:#3b82f6;">
+  <circle cx="40" cy="52" r="14"/>
+</g>
+<g style="fill:#22c55e;">
+  <circle cx="88" cy="52" r="14"/>
+</g>
+<g style="fill:#f59e0b;">
+  <circle cx="64" cy="88" r="14"/>
+</g>
+<g style="stroke:#30363d;stroke-width:3;">
+  <line x1="40" y1="52" x2="64" y2="88"/>
+</g>
+<g style="stroke:#30363d;stroke-width:3;">
+  <line x1="88" y1="52" x2="64" y2="88"/>
+</g>
+<g style="stroke:#30363d;stroke-width:3;">
+  <line x1="40" y1="52" x2="88" y2="52"/>
+</g>
+</g>
+</svg>
