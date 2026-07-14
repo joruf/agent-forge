@@ -36,6 +36,11 @@ from agentforge.agents.task_state import (
 )
 from agentforge.agents.workspace_agenda import AgendaAction, build_workspace_agenda
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
+from agentforge.agents.workspace_path_resolver import (
+    activate_path_resolution_context,
+    build_path_resolution_context,
+    deactivate_path_resolution_context,
+)
 from agentforge.agents.workspace_executor import (
     apply_file_text_replacement,
     build_deliverable_status_summary,
@@ -1271,99 +1276,104 @@ class AgentOrchestrator:
         workspace_intent = detect_workspace_intent(user_content)
         prior_board = await load_task_board_memory(chat_id)
         task_state = build_task_state(user_content, workspace_intent, prior_board)
+        path_resolution = build_path_resolution_context(user_content, workspace_intent)
+        path_context_token = activate_path_resolution_context(path_resolution)
         prefetched_reads: dict[str, str] = {}
-        read_only = (
-            workspace_intent.wants_file_read
-            and not workspace_intent.wants_file_creation
-        )
-        async with command_audit_scope(chat_id, "system", "System", on_event):
-            if read_only:
-                prefetched_reads = await prefetch_read_file_contents(
-                    user_content,
-                    workspace_intent,
-                )
-                seed_read_facts(task_state, prefetched_reads)
-                path_context = build_read_context_block(prefetched_reads)
-            else:
-                path_context = await build_workspace_path_context(workspace_intent)
-                if workspace_intent.wants_list_directory and path_context:
-                    listing_targets = list(
-                        workspace_intent.target_dirs or workspace_intent.target_paths
+        try:
+            read_only = (
+                workspace_intent.wants_file_read
+                and not workspace_intent.wants_file_creation
+            )
+            async with command_audit_scope(chat_id, "system", "System", on_event):
+                if read_only:
+                    prefetched_reads = await prefetch_read_file_contents(
+                        user_content,
+                        workspace_intent,
                     )
-                    if listing_targets:
-                        seed_list_directory_facts(
-                            task_state,
-                            listing_targets[0],
-                            path_context,
+                    seed_read_facts(task_state, prefetched_reads)
+                    path_context = build_read_context_block(prefetched_reads)
+                else:
+                    path_context = await build_workspace_path_context(workspace_intent)
+                    if workspace_intent.wants_list_directory and path_context:
+                        listing_targets = list(
+                            workspace_intent.target_dirs or workspace_intent.target_paths
                         )
-        process_context = path_context
-        if workspace_intent.requires_tools:
-            process_context = "\n".join(
-                part for part in (path_context, workspace_intent.build_prompt_addon()) if part
-            )
-        if workspace_intent.requires_tools:
-            self._ambient_context = ""
-        else:
-            self._ambient_context = await context_registry.build_for_message(
-                user_content,
-                chat_id,
-                on_event=on_event,
-                process_context=process_context,
-                client_ip=client_ip,
-                workspace_task_active=workspace_intent.requires_tools,
-            )
-
-        if mode == OrchestrationMode.MULTI:
-            result = await self._run_multi(
-                chat_id,
-                user_content,
-                role_ids,
-                memory_context,
-                tools,
-                memory_settings.memory_scope,
-                effective_strategy,
-                on_event,
-                intervention_queue,
-                workspace_intent=workspace_intent,
-                path_context=path_context,
-                task_state=task_state,
-                prefetched_reads=prefetched_reads,
-            )
-        elif mode == OrchestrationMode.QUICK:
-            result = await self._run_quick(
-                chat_id,
-                user_content,
-                memory_context,
-                memory_settings.enabled,
-                effective_strategy,
-                on_event,
-                intervention_queue,
-                path_context=path_context,
-            )
-        else:
-            result = await self._run_single(
-                chat_id,
-                user_content,
-                role_ids,
-                memory_context,
-                tools,
-                memory_settings.memory_scope,
-                effective_strategy,
-                on_event,
-                intervention_queue,
-                workspace_intent=workspace_intent,
-                path_context=path_context,
-                task_state=task_state,
-                prefetched_reads=prefetched_reads,
-            )
-            if result.resolved_role_id:
-                await conversation_store.update_chat(
+                        if listing_targets:
+                            seed_list_directory_facts(
+                                task_state,
+                                listing_targets[0],
+                                path_context,
+                            )
+            process_context = path_context
+            if workspace_intent.requires_tools:
+                process_context = "\n".join(
+                    part for part in (path_context, workspace_intent.build_prompt_addon()) if part
+                )
+            if workspace_intent.requires_tools:
+                self._ambient_context = ""
+            else:
+                self._ambient_context = await context_registry.build_for_message(
+                    user_content,
                     chat_id,
-                    ChatUpdate(role_ids=[result.resolved_role_id]),
+                    on_event=on_event,
+                    process_context=process_context,
+                    client_ip=client_ip,
+                    workspace_task_active=workspace_intent.requires_tools,
                 )
 
-        await persist_task_board(chat_id, task_state)
-        return result
+            if mode == OrchestrationMode.MULTI:
+                result = await self._run_multi(
+                    chat_id,
+                    user_content,
+                    role_ids,
+                    memory_context,
+                    tools,
+                    memory_settings.memory_scope,
+                    effective_strategy,
+                    on_event,
+                    intervention_queue,
+                    workspace_intent=workspace_intent,
+                    path_context=path_context,
+                    task_state=task_state,
+                    prefetched_reads=prefetched_reads,
+                )
+            elif mode == OrchestrationMode.QUICK:
+                result = await self._run_quick(
+                    chat_id,
+                    user_content,
+                    memory_context,
+                    memory_settings.enabled,
+                    effective_strategy,
+                    on_event,
+                    intervention_queue,
+                    path_context=path_context,
+                )
+            else:
+                result = await self._run_single(
+                    chat_id,
+                    user_content,
+                    role_ids,
+                    memory_context,
+                    tools,
+                    memory_settings.memory_scope,
+                    effective_strategy,
+                    on_event,
+                    intervention_queue,
+                    workspace_intent=workspace_intent,
+                    path_context=path_context,
+                    task_state=task_state,
+                    prefetched_reads=prefetched_reads,
+                )
+                if result.resolved_role_id:
+                    await conversation_store.update_chat(
+                        chat_id,
+                        ChatUpdate(role_ids=[result.resolved_role_id]),
+                    )
+
+            await persist_task_board(chat_id, task_state)
+            return result
+        finally:
+            deactivate_path_resolution_context(path_context_token)
 
     async def _run_single(
         self,

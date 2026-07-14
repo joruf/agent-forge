@@ -13,6 +13,43 @@ def test_resolve_path_blocks_escape(temp_workspace) -> None:
         _resolve_path("../../etc/passwd")
 
 
+def test_resolve_path_absolute_under_workspace(temp_workspace) -> None:
+    """Absolute paths under the workspace root must not double-prefix."""
+    target = temp_workspace / "GitHub" / "Test12" / "index.html"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("<h1>Hello World</h1>", encoding="utf-8")
+
+    absolute = str(target)
+    resolved = _resolve_path(absolute)
+
+    assert resolved == target.resolve()
+    assert resolved.is_file()
+
+
+def test_resolve_path_absolute_workspace_root_file(temp_workspace) -> None:
+    """Absolute paths pointing at workspace-root files resolve correctly."""
+    target = temp_workspace / "index.html"
+    target.write_text("Hello", encoding="utf-8")
+
+    absolute = str(temp_workspace / "index.html")
+    resolved = _resolve_path(absolute)
+
+    assert resolved == target.resolve()
+
+
+@pytest.mark.asyncio
+async def test_read_file_accepts_absolute_workspace_path(temp_workspace) -> None:
+    """read_file accepts absolute paths that lie inside the workspace root."""
+    read_tool = ReadFileTool()
+    target = temp_workspace / "GitHub" / "Test12" / "index.html"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("Hello Bot", encoding="utf-8")
+
+    result = await read_tool.execute({"path": str(target)})
+    assert result.success is True
+    assert "Hello Bot" in result.output
+
+
 @pytest.mark.asyncio
 async def test_write_and_read_file(temp_workspace) -> None:
     """Write and read tools operate within workspace."""

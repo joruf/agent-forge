@@ -12,7 +12,7 @@ from agentforge.agents.deliverable_types import (
 )
 from agentforge.agents.workspace_intent import WorkspaceIntent, extract_named_folder
 from agentforge.config import settings
-from agentforge.tools.registry import WriteFileTool, _resolve_path
+from agentforge.tools.registry import WriteFileTool, _resolve_path, normalize_workspace_relative_path
 
 REQUESTED_FILE = re.compile(
     r"\b([\w.-]+\.(?:php|html|htm|css|js|ts|tsx|jsx|py|md|json|txt|vue|sql|xml|yaml|yml|sh))\b",
@@ -685,8 +685,10 @@ def file_exists_in_workspace(relative_path: str) -> bool:
     :return: True when the file exists
     """
     try:
-        return _resolve_path(relative_path).is_file()
-    except PermissionError:
+        normalized = normalize_workspace_relative_path(relative_path)
+        target = (settings.workspace_root.resolve() / normalized).resolve()
+        return target.is_file()
+    except (OSError, PermissionError):
         return False
 
 

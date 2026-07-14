@@ -67,6 +67,10 @@ class WorkspaceIntent:
             if self.raw_paths:
                 raw = ", ".join(self.raw_paths)
                 lines.append(f"User-mentioned path(s): {raw}")
+            lines.append(
+                "Use workspace-relative paths only (for example GitHub/Test12/index.html). "
+                "Never pass absolute filesystem paths to read_file or write_file."
+            )
             return "\n".join(lines)
 
         if self.wants_file_read:
@@ -387,7 +391,9 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
     wants_file_edit = detect_file_edit_intent(text)
 
     named_folder = extract_named_folder(text)
-    if named_folder and target_dirs and wants_file_creation:
+    if named_folder and target_dirs and (
+        wants_file_creation or wants_file_read or wants_file_edit
+    ):
         enriched_dirs: list[str] = []
         enriched_paths: list[str] = []
         for directory in target_dirs:

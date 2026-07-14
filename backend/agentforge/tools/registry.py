@@ -32,13 +32,39 @@ class BaseTool(ABC):
         """Execute the tool with parsed arguments."""
 
 
-def _resolve_path(relative_path: str) -> Path:
-    """Resolve path within workspace root."""
+def normalize_workspace_relative_path(path_str: str) -> str:
+    """
+    Normalize an absolute or relative path to a workspace-relative string.
+
+    :param path_str: Absolute or workspace-relative path
+    :return: Path relative to the workspace root
+    :raises PermissionError: When the path escapes the workspace root
+    """
+    raw = path_str.strip().strip("'\"")
+    if not raw:
+        raise PermissionError("Empty path")
+
     root = settings.workspace_root.resolve()
-    target = (root / relative_path.lstrip("/")).resolve()
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+        if not str(resolved).startswith(str(root)):
+            raise PermissionError("Path escapes workspace root")
+        return str(resolved.relative_to(root))
+
+    target = (root / raw.lstrip("/")).resolve()
     if not str(target).startswith(str(root)):
         raise PermissionError("Path escapes workspace root")
-    return target
+    return str(target.relative_to(root))
+
+
+def _resolve_path(relative_path: str) -> Path:
+    """Resolve path within workspace root."""
+    from agentforge.agents.workspace_path_resolver import resolve_workspace_path
+
+    root = settings.workspace_root.resolve()
+    normalized = resolve_workspace_path(relative_path)
+    return (root / normalized).resolve()
 
 
 def _parents_to_create(relative_path: str) -> list[str]:
