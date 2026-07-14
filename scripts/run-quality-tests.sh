@@ -31,6 +31,7 @@ ${PYTEST} -q \
   tests/test_command_audit_mandatory.py \
   tests/test_read_intent.py \
   tests/test_named_folder_intent.py \
+  tests/test_workspace_agenda.py \
   tests/test_shell_commands.py \
   tests/test_tools.py
 

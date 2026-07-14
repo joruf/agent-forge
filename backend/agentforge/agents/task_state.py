@@ -9,7 +9,12 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from agentforge.agents.workspace_intent import WorkspaceIntent
+from agentforge.agents.workspace_agenda import (
+    AgendaAction,
+    build_workspace_agenda,
+    format_agenda_block,
+)
+from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.memory.store import memory_store
 
 TASK_BOARD_MEMORY_KEY = "_agentforge_task_board"
@@ -28,6 +33,7 @@ class TaskType(StrEnum):
     READ_AND_DISPLAY = "read_and_display"
     WRITE_FILES = "write_files"
     WRITE_THEN_READ = "write_then_read"
+    WORKFLOW = "workflow"
     LIST_DIRECTORY = "list_directory"
     RUN_COMMAND = "run_command"
     GENERAL = "general"
@@ -171,6 +177,10 @@ def classify_task_type(intent: WorkspaceIntent) -> TaskType:
     :param intent: Parsed workspace intent
     :return: Task type enum value
     """
+    if intent.wants_file_edit and (
+        intent.wants_file_creation or intent.wants_file_read
+    ):
+        return TaskType.WORKFLOW
     if intent.wants_file_creation and intent.wants_file_read:
         return TaskType.WRITE_THEN_READ
     if intent.wants_file_read:
@@ -212,6 +222,11 @@ def build_task_plan(task_type: TaskType, targets: list[str]) -> list[TaskPlanSte
             TaskPlanStep(3, "read_file", "developer", "Read created file(s) from disk"),
             TaskPlanStep(4, "present_to_user", "project_manager", "Quote file content for the user"),
         ]
+    if task_type == TaskType.WORKFLOW:
+        return [
+            TaskPlanStep(1, "analyze", "project_manager", "Coordinate the full workspace workflow"),
+            TaskPlanStep(2, "present_to_user", "project_manager", "Deliver read-back and edit summary"),
+        ]
     if task_type == TaskType.LIST_DIRECTORY:
         return [
             TaskPlanStep(1, "list_directory", "developer", f"List directory: {target_text}"),
@@ -228,6 +243,55 @@ def build_task_plan(task_type: TaskType, targets: list[str]) -> list[TaskPlanSte
     ]
 
 
+def _assignee_for_agenda_action(action: AgendaAction) -> str:
+    """
+    Map an agenda action to the responsible agent role.
+
+    :param action: Agenda step action
+    :return: Role identifier
+    """
+    if action == AgendaAction.READ_FILE:
+        return "developer"
+    if action == AgendaAction.EDIT_FILE:
+        return "developer"
+    if action in {AgendaAction.CREATE_DIRECTORY, AgendaAction.WRITE_FILE}:
+        return "developer"
+    return "project_manager"
+
+
+def build_plan_from_agenda(
+    user_content: str,
+    intent: WorkspaceIntent,
+) -> tuple[list[TaskPlanStep], list[str]]:
+    """
+    Build numbered plan steps and canonical targets from a workspace agenda.
+
+    :param user_content: Original user message
+    :param intent: Parsed workspace intent
+    :return: Tuple of plan steps and deduplicated target paths
+    """
+    agenda = build_workspace_agenda(user_content, intent)
+    if not agenda:
+        return [], []
+
+    plan_steps = [
+        TaskPlanStep(
+            step.step_id,
+            step.action.value,
+            _assignee_for_agenda_action(step.action),
+            step.detail,
+        )
+        for step in agenda
+    ]
+    targets: list[str] = []
+    seen: set[str] = set()
+    for step in agenda:
+        if step.path and step.path not in seen:
+            seen.add(step.path)
+            targets.append(step.path)
+    return plan_steps, targets
+
+
 def build_task_state(
     user_content: str,
     intent: WorkspaceIntent,
@@ -242,7 +306,13 @@ def build_task_state(
     :return: Initialized task state
     """
     task_type = classify_task_type(intent)
-    targets = list(intent.target_paths or intent.target_dirs)
+    agenda_plan, agenda_targets = build_plan_from_agenda(user_content, intent)
+    if agenda_plan:
+        targets = agenda_targets
+        plan_steps = agenda_plan
+    else:
+        targets = list(intent.target_paths or intent.target_dirs)
+        plan_steps = build_task_plan(task_type, targets)
     prior_targets: list[str] = []
     prior_summary = ""
     if prior_payload:
@@ -253,7 +323,7 @@ def build_task_state(
         user_request=user_content,
         task_type=task_type,
         targets=targets,
-        plan_steps=build_task_plan(task_type, targets),
+        plan_steps=plan_steps,
         prior_targets=prior_targets,
         prior_summary=prior_summary,
     )
@@ -341,6 +411,43 @@ def seed_write_facts(
                 round_num=round_num,
             )
         )
+
+
+def seed_edit_facts(
+    task_state: TaskState,
+    relative_path: str,
+    *,
+    replace_from: str,
+    replace_to: str,
+    agent_id: str = "developer",
+    round_num: int = 0,
+    source: str = "agenda_edit",
+) -> None:
+    """
+    Seed verified edit facts after a deterministic text replacement.
+
+    :param task_state: Active task board
+    :param relative_path: Workspace-relative file path
+    :param replace_from: Original text replaced on disk
+    :param replace_to: New text written on disk
+    :param agent_id: Agent or subsystem that produced the edit
+    :param round_num: Orchestration round index
+    :param source: Fact source label
+    """
+    if not relative_path:
+        return
+    task_state.add_fact(
+        TaskFact(
+            id=f"fact_{uuid.uuid4().hex[:10]}",
+            source=source,
+            kind="file_edited",
+            path=relative_path,
+            content=f'Replaced "{replace_from}" with "{replace_to}" in {relative_path}',
+            verified=True,
+            agent_id=agent_id,
+            round_num=round_num,
+        )
+    )
 
 
 def seed_list_directory_facts(
@@ -534,6 +641,60 @@ def check_completion(task_state: TaskState) -> CompletionReport:
             )
         return CompletionReport(complete=True)
 
+    if task_state.task_type == TaskType.WORKFLOW:
+        written = {
+            fact.path
+            for fact in task_state.verified_facts("file_written")
+            if fact.path
+        }
+        edited = {
+            fact.path
+            for fact in task_state.verified_facts("file_edited")
+            if fact.path
+        }
+        file_targets = [
+            target
+            for target in task_state.targets
+            if target and "." in target.rsplit("/", 1)[-1]
+        ]
+        if not file_targets:
+            file_targets = sorted(written | edited)
+        missing_writes = [
+            target for target in file_targets if target not in written
+        ]
+        if missing_writes:
+            return CompletionReport(
+                complete=False,
+                reason="Missing verified writes before read-back",
+                missing=missing_writes,
+            )
+        missing_reads = [
+            target
+            for target in file_targets
+            if task_state.fact_content_for_path(target) is None
+        ]
+        if missing_reads:
+            return CompletionReport(
+                complete=False,
+                reason="Missing verified file content after write",
+                missing=missing_reads,
+            )
+        intent = detect_workspace_intent(task_state.user_request)
+        agenda = build_workspace_agenda(task_state.user_request, intent)
+        edit_paths = [
+            step.path
+            for step in agenda
+            if step.action == AgendaAction.EDIT_FILE and step.path
+        ]
+        missing_edits = [path for path in edit_paths if path not in edited]
+        if missing_edits:
+            return CompletionReport(
+                complete=False,
+                reason="Missing verified file edits",
+                missing=missing_edits,
+            )
+        return CompletionReport(complete=True)
+
     if task_state.task_type == TaskType.LIST_DIRECTORY:
         if task_state.verified_facts("directory_listing"):
             return CompletionReport(complete=True)
@@ -716,6 +877,13 @@ def format_role_output_schema(role_id: str, task_type: TaskType) -> str:
                 "RESULT: created paths, then quoted file content\n"
                 "NOTES: never invent content; read back from disk"
             )
+        if task_type == TaskType.WORKFLOW:
+            return (
+                "\n\nResponse format:\n"
+                "ACTION: write_file, read_file, then edit_file when scheduled\n"
+                "RESULT: created paths, quoted read-back, then edit confirmation\n"
+                "NOTES: follow the numbered agenda order exactly"
+            )
         return (
             "\n\nResponse format:\n"
             "ACTION: tool used\n"
@@ -797,7 +965,22 @@ def format_task_plan_block(task_state: TaskState) -> str:
     ]
     if task_state.targets:
         lines.append("Targets: " + ", ".join(task_state.targets))
-    lines.append("Plan:")
+    agenda_block = format_agenda_block(
+        build_workspace_agenda(
+            task_state.user_request,
+            detect_workspace_intent(task_state.user_request),
+        )
+    )
+    if agenda_block:
+        lines.append(agenda_block)
+    else:
+        lines.append("Plan:")
+        for step in task_state.plan_steps:
+            lines.append(
+                f"{step.step_id}. [{step.assignee}] {step.action} — {step.detail}"
+            )
+        return "\n".join(lines)
+    lines.append("Role assignments:")
     for step in task_state.plan_steps:
         lines.append(
             f"{step.step_id}. [{step.assignee}] {step.action} — {step.detail}"
@@ -890,6 +1073,24 @@ def build_final_response_from_task_state(task_state: TaskState) -> str:
                 continue
             seen_paths.add(fact.path)
             blocks.append(f"Datei `{fact.path}`:\n\n```\n{fact.content}\n```")
+        if blocks:
+            return "\n\n".join(blocks)
+
+    if task_state.task_type == TaskType.WORKFLOW:
+        blocks: list[str] = []
+        seen_paths: set[str] = set()
+        for fact in task_state.verified_facts("file_content"):
+            if not fact.path or fact.path in seen_paths:
+                continue
+            seen_paths.add(fact.path)
+            blocks.append(f"Datei `{fact.path}`:\n\n```\n{fact.content}\n```")
+        edited = task_state.verified_facts("file_edited")
+        if edited:
+            edit_lines = ["Applied edits:"]
+            for fact in edited:
+                if fact.path:
+                    edit_lines.append(f"- {fact.path}: {fact.content}")
+            blocks.append("\n".join(edit_lines))
         if blocks:
             return "\n\n".join(blocks)
 

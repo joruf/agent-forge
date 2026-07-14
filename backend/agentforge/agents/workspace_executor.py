@@ -752,6 +752,33 @@ def build_implementation_prompt(user_content: str, file_paths: list[str]) -> str
     )
 
 
+async def apply_file_text_replacement(
+    relative_path: str,
+    replace_from: str,
+    replace_to: str,
+) -> tuple[bool, str]:
+    """
+    Replace text in a workspace file and write the result back to disk.
+
+    :param relative_path: Workspace-relative file path
+    :param replace_from: Text to replace
+    :param replace_to: Replacement text
+    :return: Tuple of success flag and summary or error message
+    """
+    success, content = read_workspace_file(relative_path)
+    if not success:
+        return False, content
+    if replace_to in content and replace_from not in content:
+        return True, f"Edit already applied in {relative_path}"
+    if replace_from not in content:
+        return False, f'Text not found in {relative_path}: "{replace_from}"'
+    updated = content.replace(replace_from, replace_to)
+    write_ok, output = await write_file_direct(relative_path, updated)
+    if not write_ok:
+        return False, output
+    return True, f'Updated {relative_path}: "{replace_from}" -> "{replace_to}"'
+
+
 async def write_file_direct(relative_path: str, content: str) -> tuple[bool, str]:
     """
     Write one file directly through the workspace tool.

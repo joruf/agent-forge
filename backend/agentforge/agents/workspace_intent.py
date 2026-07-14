@@ -18,6 +18,7 @@ class WorkspaceIntent:
     wants_list_directory: bool = False
     wants_directory_creation: bool = False
     wants_command_execution: bool = False
+    wants_file_edit: bool = False
     target_paths: list[str] = field(default_factory=list)
     target_dirs: list[str] = field(default_factory=list)
     raw_paths: list[str] = field(default_factory=list)
@@ -35,6 +36,7 @@ class WorkspaceIntent:
             or self.wants_list_directory
             or self.wants_directory_creation
             or self.wants_command_execution
+            or self.wants_file_edit
         )
 
     def build_prompt_addon(self) -> str:
@@ -45,13 +47,17 @@ class WorkspaceIntent:
         """
         if self.wants_file_creation and self.wants_file_read:
             lines = [
-                "\n\nWorkspace write-then-read workflow required:",
-                "Execute in this exact order:",
+                "\n\nWorkspace workflow required (complete every step in order):",
                 "1. Create missing directories (write_file creates parent folders automatically).",
                 "2. write_file for each requested file with the exact user-specified content.",
                 "3. read_file for each created file and quote the on-disk content verbatim.",
-                "Never skip creation or read steps. Never invent file contents.",
             ]
+            if self.wants_file_edit:
+                lines.append(
+                    "4. Edit the file on disk (write_file with replaced text) when the user "
+                    "asked to replace or change content."
+                )
+            lines.append("Never skip steps. Never invent file contents.")
             if self.target_paths:
                 paths = ", ".join(self.target_paths)
                 lines.append(f"Target file path(s) (relative to workspace root): {paths}")
@@ -186,6 +192,24 @@ REQUESTED_FILE_NAME = re.compile(
     re.IGNORECASE,
 )
 
+EDIT_KEYWORDS = re.compile(
+    r"\b("
+    r"bearbeit\w*|edit(?:ing|s|ed)?|änder\w*|ander\w*|update\w*|modif\w*|"
+    r"tausch\w*|replace\w*|ersetz\w*"
+    r")\b",
+    re.IGNORECASE,
+)
+
+REPLACE_QUOTED = re.compile(
+    r'tausch(?:e)?\s+"([^"]+)"\s+aus\s+gegen\s+"([^"]+)"',
+    re.IGNORECASE,
+)
+
+REPLACE_AGAINST = re.compile(
+    r'(?:tausch(?:e)?|replace)\s+["\']?(.+?)["\']?\s+(?:aus\s+)?gegen\s+["\']?(.+?)["\']?',
+    re.IGNORECASE,
+)
+
 NAMED_FOLDER = re.compile(
     r"(?:"
     r"(?:ordner|verzeichnis|folder|directory)"
@@ -215,6 +239,36 @@ def extract_named_folder(user_content: str) -> str | None:
         ):
             continue
         return name
+    return None
+
+
+def detect_file_edit_intent(user_content: str) -> bool:
+    """
+    Return True when the user asked to modify an existing file.
+
+    :param user_content: User message text
+    :return: Whether an edit/replace step is required
+    """
+    text = user_content or ""
+    if not EDIT_KEYWORDS.search(text):
+        return False
+    return bool(REPLACE_QUOTED.search(text) or REPLACE_AGAINST.search(text))
+
+
+def extract_text_replacement(user_content: str) -> tuple[str, str] | None:
+    """
+    Extract old/new text pair from replace instructions.
+
+    :param user_content: User message text
+    :return: Tuple of (old_text, new_text) or None
+    """
+    text = user_content or ""
+    match = REPLACE_QUOTED.search(text)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    match = REPLACE_AGAINST.search(text)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
     return None
 
 
@@ -330,6 +384,7 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
 
     wants_directory_creation = wants_file_creation and bool(target_dirs)
     wants_list_directory = wants_list and not wants_file_read and not wants_file_creation
+    wants_file_edit = detect_file_edit_intent(text)
 
     named_folder = extract_named_folder(text)
     if named_folder and target_dirs and wants_file_creation:
@@ -404,6 +459,7 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
         wants_list_directory=wants_list_directory,
         wants_directory_creation=wants_directory_creation,
         wants_command_execution=wants_command,
+        wants_file_edit=wants_file_edit,
         target_paths=target_paths,
         target_dirs=target_dirs,
         raw_paths=raw_paths,

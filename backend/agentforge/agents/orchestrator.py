@@ -13,6 +13,7 @@ from agentforge.agents.role_registry import role_registry
 from agentforge.agents.role_router import AUTO_ROLE, resolve_single_role
 from agentforge.agents.task_state import (
     TaskState,
+    TaskType as WorkspaceTaskType,
     build_escalation_message,
     build_final_response_from_task_state,
     build_pm_verification_block,
@@ -29,11 +30,14 @@ from agentforge.agents.task_state import (
     record_tool_result_as_fact,
     seed_read_facts,
     seed_write_facts,
+    seed_edit_facts,
     seed_list_directory_facts,
     MAX_WEAK_RETRIES,
 )
+from agentforge.agents.workspace_agenda import AgendaAction, build_workspace_agenda
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.agents.workspace_executor import (
+    apply_file_text_replacement,
     build_deliverable_status_summary,
     build_implementation_prompt,
     build_materialization_prompt,
@@ -1120,6 +1124,59 @@ class AgentOrchestrator:
         updated.update(fresh)
         return updated
 
+    async def _apply_agenda_edits(
+        self,
+        chat_id: str,
+        user_content: str,
+        intent: WorkspaceIntent,
+        task_state: TaskState | None,
+        on_event: Callable | None,
+    ) -> str:
+        """
+        Apply deterministic edit steps from the workspace agenda after read-back.
+
+        :param chat_id: Chat session ID
+        :param user_content: Original user request
+        :param intent: Parsed workspace intent
+        :param task_state: Shared task board
+        :param on_event: Optional WebSocket callback
+        :return: Summary of applied edits or empty string
+        """
+        if not intent.wants_file_edit:
+            return ""
+
+        agenda = build_workspace_agenda(user_content, intent)
+        edit_steps = [
+            step for step in agenda if step.action == AgendaAction.EDIT_FILE
+        ]
+        if not edit_steps:
+            return ""
+
+        applied: list[str] = []
+        async with command_audit_scope(chat_id, "system", "System", on_event):
+            for step in edit_steps:
+                if not step.path or not step.replace_from or not step.replace_to:
+                    continue
+                success, message = await apply_file_text_replacement(
+                    step.path,
+                    step.replace_from,
+                    step.replace_to,
+                )
+                if not success:
+                    continue
+                applied.append(message)
+                if task_state is not None:
+                    seed_edit_facts(
+                        task_state,
+                        step.path,
+                        replace_from=step.replace_from,
+                        replace_to=step.replace_to,
+                    )
+
+        if not applied:
+            return ""
+        return "Applied file edits:\n- " + "\n- ".join(applied)
+
     async def _build_user_input_response(
         self,
         chat_id: str,
@@ -1436,6 +1493,13 @@ class AgentOrchestrator:
                 on_event,
                 prefetched_reads,
             )
+            await self._apply_agenda_edits(
+                chat_id,
+                user_content,
+                workspace_intent,
+                task_state,
+                on_event,
+            )
             read_summary = build_final_response_from_task_state(task_state)
             if not read_summary:
                 read_summary = build_read_task_summary(
@@ -1617,6 +1681,16 @@ class AgentOrchestrator:
             on_event,
             prefetched_reads,
         )
+        edit_summary = await self._apply_agenda_edits(
+            chat_id,
+            user_content,
+            workspace_intent,
+            task_state,
+            on_event,
+        )
+        if edit_summary:
+            transcript.append(f"System: {edit_summary}")
+
         if prefetched_reads:
             read_lines = [
                 "System: Verified file content loaded from disk:",
@@ -1815,14 +1889,23 @@ class AgentOrchestrator:
             round_num=max_multi_rounds,
         )
 
-        prefetched_reads = await self._refresh_reads_after_writes(
-            chat_id,
-            user_content,
-            workspace_intent,
-            task_state,
-            on_event,
-            prefetched_reads,
-        )
+        if task_state and task_state.task_type == WorkspaceTaskType.WORKFLOW:
+            await self._apply_agenda_edits(
+                chat_id,
+                user_content,
+                workspace_intent,
+                task_state,
+                on_event,
+            )
+        else:
+            prefetched_reads = await self._refresh_reads_after_writes(
+                chat_id,
+                user_content,
+                workspace_intent,
+                task_state,
+                on_event,
+                prefetched_reads,
+            )
 
         completion = check_completion(task_state)
         verification = build_pm_verification_block(task_state, completion)
