@@ -10,12 +10,16 @@ from agentforge.agents.deliverable_types import (
     match_deliverable_file_type,
     match_deliverable_file_types,
 )
-from agentforge.agents.workspace_intent import WorkspaceIntent
+from agentforge.agents.workspace_intent import WorkspaceIntent, extract_named_folder
 from agentforge.config import settings
 from agentforge.tools.registry import WriteFileTool, _resolve_path
 
 REQUESTED_FILE = re.compile(
     r"\b([\w.-]+\.(?:php|html|htm|css|js|ts|tsx|jsx|py|md|json|txt|vue|sql|xml|yaml|yml|sh))\b",
+    re.IGNORECASE,
+)
+NAMED_FILE = re.compile(
+    r"(?:datei|file)\s+mit\s+(?:dem\s+)?namen[\s.:,]+([\w.-]+\.\w+)",
     re.IGNORECASE,
 )
 CODE_FENCE = re.compile(r"^```[\w.-]*\n(.*?)```$", re.DOTALL | re.IGNORECASE)
@@ -93,6 +97,15 @@ def resolve_read_file_paths(user_content: str, intent: WorkspaceIntent) -> list[
     """
     paths: list[str] = []
     seen: set[str] = set()
+
+    if intent.wants_file_creation:
+        planned = plan_deliverable_files(user_content, intent)
+        for relative in planned:
+            if relative not in seen:
+                seen.add(relative)
+                paths.append(relative)
+        if paths:
+            return paths
 
     for relative in intent.target_paths:
         if Path(relative).suffix and relative not in seen:
@@ -234,7 +247,12 @@ def infer_requested_files(user_content: str, intent: WorkspaceIntent) -> list[st
     :param intent: Parsed workspace intent
     :return: Relative file paths inside the workspace
     """
-    names = [match.group(1) for match in REQUESTED_FILE.finditer(user_content or "")]
+    text = user_content or ""
+    named_match = NAMED_FILE.search(text)
+    if named_match:
+        names = [named_match.group(1)]
+    else:
+        names = [match.group(1) for match in REQUESTED_FILE.finditer(text)]
     unique_names: list[str] = []
     seen: set[str] = set()
     for name in names:
@@ -245,6 +263,14 @@ def infer_requested_files(user_content: str, intent: WorkspaceIntent) -> list[st
 
     if not unique_names:
         return []
+
+    file_targets = [
+        relative
+        for relative in intent.target_paths
+        if Path(relative).suffix
+    ]
+    if file_targets:
+        return file_targets
 
     for relative in intent.target_paths:
         path = Path(relative)
@@ -259,6 +285,11 @@ def infer_requested_files(user_content: str, intent: WorkspaceIntent) -> list[st
             base_dir = intent.target_paths[0]
 
     if base_dir:
+        named_folder = extract_named_folder(user_content)
+        if named_folder and not (
+            base_dir.endswith(f"/{named_folder}") or base_dir == named_folder
+        ):
+            return [f"{base_dir}/{named_folder}/{name}" for name in unique_names]
         return [f"{base_dir}/{name}" for name in unique_names]
     return unique_names
 

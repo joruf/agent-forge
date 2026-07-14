@@ -159,6 +159,32 @@ async def test_write_test12_prompt_creates_requested_structure(
 
 
 @pytest.mark.asyncio
+async def test_write_then_read_test12_prompt_returns_file_content(
+    monkeypatch,
+    temp_workspace: Path,
+) -> None:
+    """Write-then-read prompts create files first and return on-disk content."""
+    (temp_workspace / "GitHub").mkdir()
+    prompt = (
+        f"erstelle einen Ordner mit dem Namen Test12\nim Verzeichnis\n{temp_workspace}/GitHub\n"
+        "darin eine Datei mit dem Namen test12345.txt\n"
+        'in der test.txt schreibst du den Text "Hello World"\n'
+        f"lese danach die Datei hier aus: {temp_workspace}/GitHub/test12345.txt "
+        "und gebe den text hier aus"
+    )
+
+    result = await run_orchestration(
+        monkeypatch,
+        temp_workspace,
+        prompt,
+        agent_loop=make_team_loop(),
+    )
+
+    assert_file_content(temp_workspace, "GitHub/Test12/test12345.txt", "Hello World")
+    assert_final_message_contains(result, "Hello World", "GitHub/Test12/test12345.txt")
+
+
+@pytest.mark.asyncio
 async def test_write_prompt_audits_scan_and_file_operations(
     monkeypatch,
     temp_workspace: Path,
@@ -219,11 +245,11 @@ async def test_write_prompt_injects_missing_directory_context_to_agents(
         agent_loop=make_team_loop(capture=captured),
     )
 
-    developer_messages = captured.get("developer", [])
-    assert developer_messages, "Expected at least one developer turn"
+    reviewer_messages = captured.get("reviewer", [])
+    assert reviewer_messages, "Expected at least one reviewer turn"
     combined = "\n".join(
         message.get("content", "")
-        for turn in developer_messages
+        for turn in reviewer_messages
         for message in turn
         if isinstance(message, dict)
     )
@@ -512,3 +538,39 @@ async def test_scanner_lists_existing_github_structure_for_write_prompt(
     assert "GitHub/Test12" in context
     assert "does not exist yet" in context
     assert any(command.startswith("list_directory") for command in audit_commands(events))
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_repetition_stall_stops_endless_discussion(
+    monkeypatch,
+    temp_workspace: Path,
+) -> None:
+    """Repeated agent messages trigger a stall guard instead of endless rounds."""
+    from agentforge.config import settings
+
+    monkeypatch.setattr(settings, "multi_agent_max_rounds", 4)
+    (temp_workspace / "GitHub").mkdir()
+    prompt = (
+        f"lese den dateiinhalt von {temp_workspace}/GitHub/Test12/test12345.txt "
+        "und liste mir den inhalt hier auf"
+    )
+    repeat_message = (
+        "VERDICT: fail\n"
+        "REASON: Missing verified file content for GitHub/Test12/test12345.txt. "
+        "Verify that the requested path is correct and the file is actually found."
+    )
+
+    result = await run_orchestration(
+        monkeypatch,
+        temp_workspace,
+        prompt,
+        role_ids=["developer", "reviewer", "project_manager"],
+        agent_loop=make_team_loop(role_responses={"reviewer": repeat_message}),
+    )
+
+    reviewer_posts = [
+        discussion
+        for discussion in result.agent_discussions
+        if discussion.from_agent == "Reviewer"
+    ]
+    assert len(reviewer_posts) <= 1

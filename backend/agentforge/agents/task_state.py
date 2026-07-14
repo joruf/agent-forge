@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
@@ -16,6 +17,9 @@ MAX_PERSISTED_FACTS = 40
 MAX_FACTS_IN_PROMPT = 12
 MAX_PRIOR_FACTS_IN_PROMPT = 8
 MAX_WEAK_RETRIES = 2
+MAX_REPETITION_STALLS = 2
+REPETITION_SIMILARITY_THRESHOLD = 0.85
+MIN_REPETITION_TEXT_LENGTH = 40
 
 
 class TaskType(StrEnum):
@@ -23,6 +27,7 @@ class TaskType(StrEnum):
 
     READ_AND_DISPLAY = "read_and_display"
     WRITE_FILES = "write_files"
+    WRITE_THEN_READ = "write_then_read"
     LIST_DIRECTORY = "list_directory"
     RUN_COMMAND = "run_command"
     GENERAL = "general"
@@ -166,6 +171,8 @@ def classify_task_type(intent: WorkspaceIntent) -> TaskType:
     :param intent: Parsed workspace intent
     :return: Task type enum value
     """
+    if intent.wants_file_creation and intent.wants_file_read:
+        return TaskType.WRITE_THEN_READ
     if intent.wants_file_read:
         return TaskType.READ_AND_DISPLAY
     if intent.wants_list_directory:
@@ -197,6 +204,13 @@ def build_task_plan(task_type: TaskType, targets: list[str]) -> list[TaskPlanSte
             TaskPlanStep(1, "write_file", "developer", f"Create/update file(s): {target_text}"),
             TaskPlanStep(2, "verify_on_disk", "reviewer", "Confirm files exist on disk"),
             TaskPlanStep(3, "present_to_user", "project_manager", "Summarize created files"),
+        ]
+    if task_type == TaskType.WRITE_THEN_READ:
+        return [
+            TaskPlanStep(1, "write_file", "developer", f"Create/update file(s): {target_text}"),
+            TaskPlanStep(2, "verify_on_disk", "reviewer", "Confirm files exist on disk"),
+            TaskPlanStep(3, "read_file", "developer", "Read created file(s) from disk"),
+            TaskPlanStep(4, "present_to_user", "project_manager", "Quote file content for the user"),
         ]
     if task_type == TaskType.LIST_DIRECTORY:
         return [
@@ -485,6 +499,41 @@ def check_completion(task_state: TaskState) -> CompletionReport:
             )
         return CompletionReport(complete=True)
 
+    if task_state.task_type == TaskType.WRITE_THEN_READ:
+        written = {
+            fact.path
+            for fact in task_state.verified_facts("file_written")
+            if fact.path
+        }
+        file_targets = [
+            target
+            for target in task_state.targets
+            if target and "." in target.rsplit("/", 1)[-1]
+        ]
+        if not file_targets:
+            file_targets = sorted(written)
+        missing_writes = [
+            target for target in file_targets if target not in written
+        ]
+        if missing_writes:
+            return CompletionReport(
+                complete=False,
+                reason="Missing verified writes before read-back",
+                missing=missing_writes,
+            )
+        missing_reads = [
+            target
+            for target in file_targets
+            if task_state.fact_content_for_path(target) is None
+        ]
+        if missing_reads:
+            return CompletionReport(
+                complete=False,
+                reason="Missing verified file content after write",
+                missing=missing_reads,
+            )
+        return CompletionReport(complete=True)
+
     if task_state.task_type == TaskType.LIST_DIRECTORY:
         if task_state.verified_facts("directory_listing"):
             return CompletionReport(complete=True)
@@ -502,6 +551,70 @@ def check_completion(task_state: TaskState) -> CompletionReport:
         )
 
     return CompletionReport(complete=True)
+
+
+def normalize_discussion_text(content: str, *, max_length: int = 600) -> str:
+    """
+    Normalize agent discussion text for repetition checks.
+
+    :param content: Raw agent message text
+    :param max_length: Maximum normalized length
+    :return: Collapsed lowercase text
+    """
+    text = re.sub(r"\s+", " ", (content or "").strip().lower())
+    return text[:max_length]
+
+
+def discussion_similarity(left: str, right: str) -> float:
+    """
+    Estimate lexical similarity between two discussion messages.
+
+    :param left: First message text
+    :param right: Second message text
+    :return: Jaccard similarity score between 0.0 and 1.0
+    """
+    left_words = set(normalize_discussion_text(left).split())
+    right_words = set(normalize_discussion_text(right).split())
+    if not left_words or not right_words:
+        left_norm = normalize_discussion_text(left)
+        right_norm = normalize_discussion_text(right)
+        return 1.0 if left_norm and left_norm == right_norm else 0.0
+    union = left_words | right_words
+    if not union:
+        return 0.0
+    return len(left_words & right_words) / len(union)
+
+
+def discussion_entry_is_repeat(
+    agent_name: str,
+    content: str,
+    transcript: list[str],
+    *,
+    threshold: float = REPETITION_SIMILARITY_THRESHOLD,
+) -> bool:
+    """
+    Return True when an agent message substantially repeats prior transcript content.
+
+    :param agent_name: Display name of the speaking agent
+    :param content: Candidate message body
+    :param transcript: Current discussion transcript lines
+    :param threshold: Similarity threshold treated as a repeat
+    :return: Whether the message should be treated as repetitive
+    """
+    normalized = normalize_discussion_text(content)
+    if len(normalized) < MIN_REPETITION_TEXT_LENGTH:
+        return False
+
+    prefix = f"{agent_name}:"
+    for entry in transcript:
+        if not entry.startswith(prefix):
+            continue
+        prior_body = entry.split(": ", 1)[-1] if ": " in entry else entry
+        if normalized == normalize_discussion_text(prior_body):
+            return True
+        if discussion_similarity(content, prior_body) >= threshold:
+            return True
+    return False
 
 
 def increment_weak_retry(task_state: TaskState | None, role_id: str | None) -> int:
@@ -595,6 +708,13 @@ def format_role_output_schema(role_id: str, task_type: TaskType) -> str:
                 "ACTION: write_file|run_command\n"
                 "RESULT: list each created or updated path\n"
                 "NOTES: one short sentence per file"
+            )
+        if task_type == TaskType.WRITE_THEN_READ:
+            return (
+                "\n\nResponse format:\n"
+                "ACTION: write_file then read_file\n"
+                "RESULT: created paths, then quoted file content\n"
+                "NOTES: never invent content; read back from disk"
             )
         return (
             "\n\nResponse format:\n"
@@ -761,6 +881,17 @@ def build_final_response_from_task_state(task_state: TaskState) -> str:
                 if fact.path:
                     lines.append(f"- {fact.path}")
             return "\n".join(lines)
+
+    if task_state.task_type == TaskType.WRITE_THEN_READ:
+        blocks: list[str] = []
+        seen_paths: set[str] = set()
+        for fact in task_state.verified_facts("file_content"):
+            if not fact.path or fact.path in seen_paths:
+                continue
+            seen_paths.add(fact.path)
+            blocks.append(f"Datei `{fact.path}`:\n\n```\n{fact.content}\n```")
+        if blocks:
+            return "\n\n".join(blocks)
 
     if task_state.task_type == TaskType.LIST_DIRECTORY:
         listings = task_state.verified_facts("directory_listing")

@@ -43,6 +43,26 @@ class WorkspaceIntent:
 
         :return: Additional prompt text or empty string
         """
+        if self.wants_file_creation and self.wants_file_read:
+            lines = [
+                "\n\nWorkspace write-then-read workflow required:",
+                "Execute in this exact order:",
+                "1. Create missing directories (write_file creates parent folders automatically).",
+                "2. write_file for each requested file with the exact user-specified content.",
+                "3. read_file for each created file and quote the on-disk content verbatim.",
+                "Never skip creation or read steps. Never invent file contents.",
+            ]
+            if self.target_paths:
+                paths = ", ".join(self.target_paths)
+                lines.append(f"Target file path(s) (relative to workspace root): {paths}")
+            if self.target_dirs:
+                dirs = ", ".join(self.target_dirs)
+                lines.append(f"Target directory (relative to workspace root): {dirs}")
+            if self.raw_paths:
+                raw = ", ".join(self.raw_paths)
+                lines.append(f"User-mentioned path(s): {raw}")
+            return "\n".join(lines)
+
         if self.wants_file_read:
             lines = [
                 "\n\nWorkspace read action required:",
@@ -106,7 +126,7 @@ CREATE_KEYWORDS = re.compile(
     r"generiere|generieren|schreibe|schreiben|"
     r"verzeichnis|ordner|directory|folder|"
     r"programm|program|script|skript|entwurf|template|"
-    r"header|footer|menü|menu|content|"
+    r"header|footer|menü|menu|"
     r"mkdir|touch|kopieren|copy to|implement|implementier"
     r")\b",
     re.IGNORECASE,
@@ -135,7 +155,7 @@ WRITE_VERBS = re.compile(
     r"\b("
     r"create|write|save|speicher|speichern|erstell|generier|schreib|implement|"
     r"mkdir|touch|anleg|abspeicher"
-    r")\b",
+    r")",
     re.IGNORECASE,
 )
 
@@ -159,6 +179,11 @@ PATH_AFTER_KEYWORD = re.compile(
 
 CODE_EXTENSIONS = re.compile(
     r"\.\w{1,10}\b",
+)
+
+REQUESTED_FILE_NAME = re.compile(
+    r"\b([\w.-]+\.(?:php|html|htm|css|js|ts|tsx|jsx|py|md|json|txt|vue|sql|xml|yaml|yml|sh))\b",
+    re.IGNORECASE,
 )
 
 NAMED_FOLDER = re.compile(
@@ -283,11 +308,26 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
         text,
         re.IGNORECASE,
     )
-    wants_write = wants_create or bool(save_phrase and raw_paths)
-    wants_file_read = wants_read and not wants_list and not (
-        wants_write and WRITE_VERBS.search(text)
+    has_write = bool(
+        wants_create
+        or (save_phrase and raw_paths)
+        or WRITE_VERBS.search(text)
     )
-    wants_file_creation = wants_write and not wants_file_read
+    has_read = wants_read and not wants_list
+
+    if has_write and has_read:
+        wants_file_creation = True
+        wants_file_read = True
+    elif has_read:
+        wants_file_creation = False
+        wants_file_read = True
+    elif has_write:
+        wants_file_creation = True
+        wants_file_read = False
+    else:
+        wants_file_creation = False
+        wants_file_read = False
+
     wants_directory_creation = wants_file_creation and bool(target_dirs)
     wants_list_directory = wants_list and not wants_file_read and not wants_file_creation
 
@@ -317,6 +357,46 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
             target_dirs = enriched_dirs
         if enriched_paths:
             target_paths = enriched_paths
+
+    file_paths = [path for path in target_paths if CODE_EXTENSIONS.search(Path(path).name)]
+    dir_paths = [path for path in target_paths if path not in file_paths]
+    for directory in dir_paths:
+        if directory not in target_dirs:
+            target_dirs.append(directory)
+
+    if wants_file_creation and not file_paths:
+        seen_names: set[str] = set()
+        named = extract_named_folder(text)
+        named_file = re.search(
+            r"(?:datei|file)\s+mit\s+(?:dem\s+)?namen[\s.:,]+([\w.-]+\.\w+)",
+            text,
+            re.IGNORECASE,
+        )
+        filenames = [named_file.group(1)] if named_file else [
+            match.group(1) for match in REQUESTED_FILE_NAME.finditer(text)
+        ]
+        base: str | None = None
+        if target_dirs:
+            if named:
+                matching = [
+                    directory
+                    for directory in target_dirs
+                    if directory == named or directory.endswith(f"/{named}")
+                ]
+                base = matching[0] if matching else max(target_dirs, key=len)
+            else:
+                base = max(target_dirs, key=len)
+        for filename in filenames:
+            key = filename.lower()
+            if key in seen_names:
+                continue
+            seen_names.add(key)
+            if base:
+                combined = f"{base}/{filename}"
+                if combined not in file_paths:
+                    file_paths.append(combined)
+
+    target_paths = file_paths
 
     return WorkspaceIntent(
         wants_file_creation=wants_file_creation,

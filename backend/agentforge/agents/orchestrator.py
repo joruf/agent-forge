@@ -18,11 +18,13 @@ from agentforge.agents.task_state import (
     build_pm_verification_block,
     build_task_state,
     check_completion,
+    discussion_entry_is_repeat,
     format_role_output_schema,
     format_task_board_block,
     format_task_plan_block,
     increment_weak_retry,
     load_task_board_memory,
+    MAX_REPETITION_STALLS,
     persist_task_board,
     record_tool_result_as_fact,
     seed_read_facts,
@@ -346,6 +348,24 @@ class AgentOrchestrator:
             "project_manager": 90,
         }
         return sorted(roles, key=lambda role: (priority.get(role.id, 50), role.id))
+
+    @staticmethod
+    def _should_skip_multi_role_turn(
+        role: AgentRole,
+        round_num: int,
+        max_multi_rounds: int,
+    ) -> bool:
+        """
+        Skip redundant coordinator turns in intermediate multi-agent rounds.
+
+        :param role: Current role instance
+        :param round_num: Zero-based round index
+        :param max_multi_rounds: Total configured multi-agent rounds
+        :return: True when the role turn should be skipped
+        """
+        if role.id == "project_manager" and 0 < round_num < max_multi_rounds - 1:
+            return True
+        return False
 
     def _build_tools(self, chat_id: str, memory_scope: str) -> ToolRegistry:
         """Build tool registry with chat-specific callbacks."""
@@ -1069,6 +1089,37 @@ class AgentOrchestrator:
         )
         return content, discussion
 
+    async def _refresh_reads_after_writes(
+        self,
+        chat_id: str,
+        user_content: str,
+        intent: WorkspaceIntent,
+        task_state: TaskState | None,
+        on_event: Callable | None,
+        prefetched_reads: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """
+        Read files from disk after writes for write-then-read requests.
+
+        :param chat_id: Chat session ID
+        :param user_content: Original user request
+        :param intent: Parsed workspace intent
+        :param task_state: Shared task board
+        :param on_event: Optional WebSocket callback
+        :param prefetched_reads: Existing prefetch mapping to update
+        :return: Updated path-to-content mapping
+        """
+        if not (intent.wants_file_read and intent.wants_file_creation):
+            return prefetched_reads or {}
+
+        updated = dict(prefetched_reads or {})
+        async with command_audit_scope(chat_id, "system", "System", on_event):
+            fresh = await prefetch_read_file_contents(user_content, intent)
+        if task_state is not None:
+            seed_read_facts(task_state, fresh)
+        updated.update(fresh)
+        return updated
+
     async def _build_user_input_response(
         self,
         chat_id: str,
@@ -1164,8 +1215,12 @@ class AgentOrchestrator:
         prior_board = await load_task_board_memory(chat_id)
         task_state = build_task_state(user_content, workspace_intent, prior_board)
         prefetched_reads: dict[str, str] = {}
+        read_only = (
+            workspace_intent.wants_file_read
+            and not workspace_intent.wants_file_creation
+        )
         async with command_audit_scope(chat_id, "system", "System", on_event):
-            if workspace_intent.wants_file_read:
+            if read_only:
                 prefetched_reads = await prefetch_read_file_contents(
                     user_content,
                     workspace_intent,
@@ -1372,6 +1427,24 @@ class AgentOrchestrator:
             )
             if fallback and self._is_weak_discussion_content(content):
                 content = fallback
+        if workspace_intent.wants_file_creation and workspace_intent.wants_file_read:
+            refreshed = await self._refresh_reads_after_writes(
+                chat_id,
+                user_content,
+                workspace_intent,
+                task_state,
+                on_event,
+                prefetched_reads,
+            )
+            read_summary = build_final_response_from_task_state(task_state)
+            if not read_summary:
+                read_summary = build_read_task_summary(
+                    user_content,
+                    workspace_intent,
+                    refreshed,
+                )
+            if read_summary and self._is_weak_discussion_content(content):
+                content = read_summary
         elif workspace_intent.wants_file_read:
             read_summary = build_final_response_from_task_state(task_state)
             if not read_summary:
@@ -1536,6 +1609,14 @@ class AgentOrchestrator:
             task_state=task_state,
         )
         developer_impl_done = impl_discussion is not None
+        prefetched_reads = await self._refresh_reads_after_writes(
+            chat_id,
+            user_content,
+            workspace_intent,
+            task_state,
+            on_event,
+            prefetched_reads,
+        )
         if prefetched_reads:
             read_lines = [
                 "System: Verified file content loaded from disk:",
@@ -1558,15 +1639,25 @@ class AgentOrchestrator:
                     "routing": {"source": "implementation_phase"},
                 })
 
+        repetition_stalls = 0
+        discussion_complete = False
+
         for round_num in range(max_multi_rounds):
+            if discussion_complete:
+                break
             await self._ensure_not_cancelled()
             await self._collect_interventions(transcript, intervention_queue, on_event)
             role_index = 0
             while role_index < len(roles):
+                if discussion_complete:
+                    break
                 await self._ensure_not_cancelled()
                 await self._collect_interventions(transcript, intervention_queue, on_event)
                 role = roles[role_index]
                 if developer_impl_done and role.id == "developer" and round_num == 0:
+                    role_index += 1
+                    continue
+                if self._should_skip_multi_role_turn(role, round_num, max_multi_rounds):
                     role_index += 1
                     continue
                 can_parallelize = (
@@ -1606,6 +1697,13 @@ class AgentOrchestrator:
                         for batch_role in batch
                     ])
                     for batch_role, (content, routing, discussion) in zip(batch, results):
+                        if discussion_entry_is_repeat(batch_role.name, content, transcript):
+                            repetition_stalls += 1
+                            if repetition_stalls >= MAX_REPETITION_STALLS:
+                                discussion_complete = True
+                                break
+                            continue
+
                         discussions.append(discussion)
                         transcript.append(f"{batch_role.name}: {content}")
 
@@ -1625,6 +1723,8 @@ class AgentOrchestrator:
                                 discussions=discussions,
                                 effective_strategy=effective_strategy,
                             )
+                    if discussion_complete:
+                        break
                     continue
 
                 role_index += 1
@@ -1643,6 +1743,14 @@ class AgentOrchestrator:
                     path_context=path_context,
                     task_state=task_state,
                 )
+                if discussion_entry_is_repeat(role.name, content, transcript):
+                    repetition_stalls += 1
+                    if repetition_stalls >= MAX_REPETITION_STALLS:
+                        discussion_complete = True
+                        break
+                    role_index += 1
+                    continue
+
                 discussions.append(discussion)
                 transcript.append(f"{role.name}: {content}")
 
@@ -1680,6 +1788,9 @@ class AgentOrchestrator:
                         effective_strategy=effective_strategy,
                     )
 
+            if check_completion(task_state).complete:
+                break
+
         final_role = role_registry.get_role("project_manager") or roles[-1]
         guarantee = await self._guarantee_workspace_deliverables(
             chat_id,
@@ -1702,6 +1813,15 @@ class AgentOrchestrator:
             workspace_intent,
             agent_id="developer",
             round_num=max_multi_rounds,
+        )
+
+        prefetched_reads = await self._refresh_reads_after_writes(
+            chat_id,
+            user_content,
+            workspace_intent,
+            task_state,
+            on_event,
+            prefetched_reads,
         )
 
         completion = check_completion(task_state)

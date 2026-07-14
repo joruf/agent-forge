@@ -100,6 +100,27 @@ PROMPT_INTENT_CASES: tuple[PromptIntentCase, ...] = (
         task_type=TaskType.WRITE_FILES,
         wants_write=True,
         target_dirs=("GitHub/Test12",),
+        target_paths=("GitHub/Test12/test12345.txt",),
+        planned_files=("GitHub/Test12/test12345.txt",),
+        requires_tools=True,
+    ),
+    PromptIntentCase(
+        id="write_then_read_test12",
+        prompt=(
+            f"erstelle einen Ordner mit dem Namen Test12\nim Verzeichnis\n{WORKSPACE}\n"
+            "darin eine Datei mit dem Namen test12345.txt\n"
+            'in der test.txt schreibst du den Text "Hello World"\n'
+            f"lese danach die Datei hier aus: {WORKSPACE}/test12345.txt "
+            "und gebe den text hier aus"
+        ),
+        task_type=TaskType.WRITE_THEN_READ,
+        wants_read=True,
+        wants_write=True,
+        target_dirs=("GitHub/Test12",),
+        target_paths=("GitHub/Test12/test12345.txt",),
+        planned_files=("GitHub/Test12/test12345.txt",),
+        read_paths=("GitHub/Test12/test12345.txt",),
+        named_folder="Test12",
         requires_tools=True,
     ),
     PromptIntentCase(
@@ -205,6 +226,9 @@ def test_prompt_task_plan_matches_task_type(case: PromptIntentCase) -> None:
         assert "read_file" in actions
     elif case.task_type == TaskType.WRITE_FILES:
         assert "write_file" in actions
+    elif case.task_type == TaskType.WRITE_THEN_READ:
+        assert "write_file" in actions
+        assert "read_file" in actions
     elif case.task_type == TaskType.LIST_DIRECTORY:
         assert "list_directory" in actions
     elif case.task_type == TaskType.RUN_COMMAND:

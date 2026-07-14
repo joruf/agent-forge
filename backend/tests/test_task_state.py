@@ -11,6 +11,8 @@ from agentforge.agents.task_state import (
     build_pm_verification_block,
     build_task_state,
     check_completion,
+    discussion_entry_is_repeat,
+    discussion_similarity,
     format_inter_round_memory_block,
     format_role_output_schema,
     format_task_board_block,
@@ -188,3 +190,21 @@ def test_format_role_output_schema_for_reviewer() -> None:
     """Reviewer responses include a structured verdict schema."""
     schema = format_role_output_schema("reviewer", TaskType.READ_AND_DISPLAY)
     assert "VERDICT: pass|fail" in schema
+
+
+def test_discussion_entry_is_repeat_detects_similar_messages() -> None:
+    """Repeated agent messages are detected from the transcript history."""
+    transcript = [
+        "Reviewer: VERDICT: fail\nREASON: Missing verified file content for GitHub/Test12/test12345.txt",
+    ]
+    repeated = (
+        "VERDICT: fail\nREASON: Missing verified file content for GitHub/Test12/test12345.txt"
+    )
+    assert discussion_entry_is_repeat("Reviewer", repeated, transcript) is True
+
+
+def test_discussion_similarity_ignores_minor_changes() -> None:
+    """Near-identical messages exceed the repetition similarity threshold."""
+    left = "VERDICT: fail REASON: Missing verified file content for the requested path"
+    right = "VERDICT: fail REASON: Missing verified file content for requested path"
+    assert discussion_similarity(left, right) >= 0.85
