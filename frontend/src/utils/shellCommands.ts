@@ -92,7 +92,18 @@ export function collectShellCommands(
 
   const merged = new Map<string, ShellCommandEntry>();
   for (const entry of [...recorded, ...pendingFromApprovals, ...pendingFromLive]) {
-    merged.set(entry.id, entry);
+    const key = entry.approval_id ?? entry.id;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, entry);
+      continue;
+    }
+    const replaceExisting =
+      (existing.status === "pending" && entry.status !== "pending")
+      || new Date(entry.timestamp).getTime() >= new Date(existing.timestamp).getTime();
+    if (replaceExisting) {
+      merged.set(key, entry);
+    }
   }
 
   return Array.from(merged.values()).sort(

@@ -2,7 +2,9 @@
 
 import pytest
 
-from agentforge.tools.registry import ReadFileTool, ShellTool, WriteFileTool, _resolve_path
+from agentforge.services.command_audit import execute_shell_command
+from agentforge.tools.registry import ReadFileTool, WriteFileTool, _resolve_path
+from agentforge.tools.shell_security import classify_shell_command
 
 
 def test_resolve_path_blocks_escape(temp_workspace) -> None:
@@ -25,18 +27,38 @@ async def test_write_and_read_file(temp_workspace) -> None:
 
 @pytest.mark.asyncio
 async def test_shell_whitelist_allows_echo(temp_workspace) -> None:
-    """Whitelisted commands run without approval."""
-    tool = ShellTool()
-    result = await tool.execute({"command": "echo unit-test-ok"})
+    """Whitelisted commands run through the central audit executor."""
+    events: list[dict] = []
+
+    async def on_event(event: dict) -> None:
+        events.append(event)
+
+    result = await execute_shell_command(
+        "chat-test",
+        command="echo unit-test-ok",
+        cwd=".",
+        agent_id="developer",
+        agent_name="Developer",
+        approval_callback=None,
+        on_event=on_event,
+    )
     assert result.success is True
     assert "unit-test-ok" in result.output
+    assert any(event["type"] == "shell_command_recorded" for event in events)
 
 
 @pytest.mark.asyncio
 async def test_shell_blacklist_blocks_rm(temp_workspace) -> None:
-    """Blacklisted commands are rejected."""
-    tool = ShellTool()
-    result = await tool.execute({"command": "rm -rf /"})
+    """Blacklisted commands are rejected and logged."""
+    result = await execute_shell_command(
+        "chat-test",
+        command="rm -rf /",
+        cwd=".",
+        agent_id="developer",
+        agent_name="Developer",
+        approval_callback=None,
+        on_event=None,
+    )
     assert result.success is False
     assert "blocked" in result.output.lower()
 
@@ -44,15 +66,21 @@ async def test_shell_blacklist_blocks_rm(temp_workspace) -> None:
 @pytest.mark.asyncio
 async def test_shell_unknown_requires_approval(temp_workspace, english_locale) -> None:
     """Non-whitelisted commands require approval when no callback is set."""
-    tool = ShellTool()
-    result = await tool.execute({"command": "unknown-cmd-test-xyz"})
+    result = await execute_shell_command(
+        "chat-test",
+        command="unknown-cmd-test-xyz",
+        cwd=".",
+        agent_id="developer",
+        agent_name="Developer",
+        approval_callback=None,
+        on_event=None,
+    )
     assert result.success is False
     assert result.requires_approval is True
 
 
 def test_shell_check_command_invalid_syntax() -> None:
     """Malformed shell syntax is rejected."""
-    tool = ShellTool()
-    allowed, needs_approval, reason = tool._check_command("echo 'unclosed")
-    assert allowed is False
-    assert "syntax" in reason.lower()
+    classification = classify_shell_command("echo 'unclosed")
+    assert classification.allowed is False
+    assert "syntax" in classification.reason.lower()

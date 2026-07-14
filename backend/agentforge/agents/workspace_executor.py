@@ -19,6 +19,10 @@ REQUESTED_FILE = re.compile(
     re.IGNORECASE,
 )
 CODE_FENCE = re.compile(r"^```[\w.-]*\n(.*?)```$", re.DOTALL | re.IGNORECASE)
+LITERAL_TEXT = re.compile(
+    r'(?:text|inhalt|content|schreib(?:e|en|st)?|write(?:s|ing)?)\s+["\«„]([^"\»""]+)["\»""]',
+    re.IGNORECASE,
+)
 STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style>", re.IGNORECASE | re.DOTALL)
 ABSOLUTE_ASSET = re.compile(
     r"""(?P<attr>href|src)=["'](?P<path>/[^"']+\.(?:css|js))["']""",
@@ -28,6 +32,55 @@ EXTERNAL_SCRIPT = re.compile(
     r"""<script\b[^>]*\bsrc=["']https?://[^"']+["'][^>]*>\s*</script>""",
     re.IGNORECASE,
 )
+
+
+def extract_literal_text_content(user_content: str) -> str | None:
+    """
+    Extract literal file body text from quoted phrases in the user request.
+
+    :param user_content: User message text
+    :return: Literal text or None
+    """
+    match = LITERAL_TEXT.search(user_content or "")
+    if not match:
+        return None
+    text = match.group(1).strip()
+    return text or None
+
+
+def build_deliverable_status_summary(user_content: str, intent: WorkspaceIntent) -> str:
+    """
+    Build a verified on-disk summary for planned deliverables.
+
+    :param user_content: Original user request
+    :param intent: Parsed workspace intent
+    :return: Human-readable status message or empty string
+    """
+    planned = plan_deliverable_files(user_content, intent)
+    if not planned:
+        return ""
+
+    root = settings.workspace_root.resolve()
+    created: list[str] = []
+    missing: list[str] = []
+    for relative in planned:
+        absolute = root / relative
+        if file_exists_in_workspace(relative):
+            created.append(f"- {relative} → {absolute}")
+        else:
+            missing.append(relative)
+
+    if missing:
+        return (
+            "Could not verify all requested files on disk.\n"
+            f"Missing: {', '.join(missing)}\n"
+            f"Workspace root: {root}"
+        )
+    return (
+        "Created files on disk:\n"
+        + "\n".join(created)
+        + f"\n\nWorkspace root: {root}"
+    )
 
 
 def _base_directory(intent: WorkspaceIntent) -> str | None:
@@ -457,6 +510,10 @@ def fallback_file_content(relative_path: str, user_content: str) -> str:
         return "// Generated TypeScript\nexport {};\n"
     if suffix == ".json":
         return "{\n  \"generated\": true\n}\n"
+    if suffix == ".txt":
+        literal = extract_literal_text_content(user_content)
+        if literal is not None:
+            return literal if literal.endswith("\n") else f"{literal}\n"
     return f"Generated for request:\n{user_content.strip()}\n"
 
 

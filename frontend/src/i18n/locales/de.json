@@ -149,8 +149,20 @@
       "cloud": "Cloud",
       "memory": "Gedächtnis",
       "context": "Context",
-      "agents": "Agenten"
-    }
+      "agents": "Agenten",
+      "security": "Sicherheit"
+    },
+    "shellCommandsTitle": "Konsolenbefehle",
+    "shellCommandsHint": "Steuert, welche Shell-Befehle Agenten im Arbeitsverzeichnis ausführen dürfen.",
+    "shellCommandsRulesIntro": "Regeln für run_command:",
+    "shellCommandsRuleWhitelist": "Erlaubte Befehle werden automatisch ausgeführt und in der Befehls-Historie des Chats protokolliert.",
+    "shellCommandsRuleBlacklist": "Blockierte Befehle werden nie ausgeführt und als blockiert protokolliert.",
+    "shellCommandsRuleApproval": "Alle anderen Befehle benötigen deine Freigabe vor der Ausführung.",
+    "shellCommandsWhitelist": "Erlaubte Befehle",
+    "shellCommandsWhitelistEdit": "Erlaubte Befehle bearbeiten (einer pro Zeile)",
+    "shellCommandsBlacklist": "Blockierte Befehle",
+    "shellCommandsBlacklistEdit": "Blockierte Befehle bearbeiten (einer pro Zeile)",
+    "resizeHint": "Größe unten rechts am Fenster ziehen"
   },
   "about": {
     "title": "Über AgentForge",

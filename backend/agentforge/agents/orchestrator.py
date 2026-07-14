@@ -13,6 +13,7 @@ from agentforge.agents.role_registry import role_registry
 from agentforge.agents.role_router import AUTO_ROLE, resolve_single_role
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.agents.workspace_executor import (
+    build_deliverable_status_summary,
     build_implementation_prompt,
     build_materialization_prompt,
     fallback_file_content,
@@ -42,6 +43,7 @@ from agentforge.models.schemas import (
     MessageResponse,
     OrchestrationMode,
     OrchestrationResponse,
+    ToolCallResult,
 )
 from agentforge.services.setup_service import run_readiness_check
 from agentforge.storage.conversation_store import conversation_store
@@ -56,7 +58,17 @@ from agentforge.tools.registry import (
     ToolRegistry,
     WebSearchTool,
     WriteFileTool,
+    _resolve_path,
 )
+from agentforge.services.command_audit import (
+    CommandAuditContext,
+    audit_context,
+    command_audit_scope,
+    execute_shell_command,
+    record_command,
+    serialize_shell_command_entry,
+)
+from agentforge.tools.shell_security import classify_shell_command, run_shell_command
 
 
 def _effective_chat_memory(memory: ChatMemorySettings) -> ChatMemorySettings:
@@ -510,12 +522,20 @@ class AgentOrchestrator:
         max_rounds = self._resolve_multi_rounds()
         workspace_note = ""
         if intent.wants_file_creation and role.id in self.FULL_TOOL_ROLES:
+            planned = plan_deliverable_files(user_content, intent)
             workspace_note = (
                 "\n\nIMPORTANT: The user wants files saved on disk. "
                 "Use write_file for every file you create. "
                 "Do not paste code or JSON templates in chat."
             )
-            if intent.target_dirs:
+            if planned:
+                files_block = "\n".join(f"- {path}" for path in planned)
+                workspace_note += (
+                    "\nRequired workspace-relative file path(s):\n"
+                    f"{files_block}\n"
+                    "Use these exact paths with write_file."
+                )
+            elif intent.target_dirs:
                 workspace_note += (
                     f"\nTarget directory (workspace-relative): {', '.join(intent.target_dirs)}"
                 )
@@ -535,6 +555,16 @@ class AgentOrchestrator:
                 + pm_note
             )
         if role.id == "project_manager":
+            deliverable_note = ""
+            if intent.wants_file_creation:
+                planned = plan_deliverable_files(user_content, intent)
+                if planned:
+                    files_block = "\n".join(f"- {path}" for path in planned)
+                    deliverable_note = (
+                        "\nOnly claim success when these files exist on disk:\n"
+                        f"{files_block}\n"
+                        "Do not invent paths or results."
+                    )
             return (
                 "Final synthesis requested.\n"
                 + "\n".join(transcript)
@@ -544,6 +574,7 @@ class AgentOrchestrator:
                     if intent.wants_file_creation
                     else ""
                 )
+                + deliverable_note
             )
 
         role_note = self._role_multi_discussion_note(role.id)
@@ -719,34 +750,36 @@ class AgentOrchestrator:
         if not file_paths:
             return ""
 
+        role = role_registry.get_role(role_id)
+        agent_name = role.name if role else role_id
         llm, _ = await self._resolve_llm(user_content, role_id, mode_single=True)
         written: list[str] = []
         for path in file_paths:
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You generate complete file contents for software projects. "
-                        "Reply with file content only. No markdown fences, no explanation."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": build_materialization_prompt(
-                        user_content,
-                        path,
-                        file_paths,
-                    ),
-                },
-            ]
-            result = await llm.complete(messages, tools=None, max_tokens=4096)
-            body = ""
-            if not result.get("error"):
-                body = result.get("content") or ""
-            body = prepare_deliverable_content(path, body, user_content, file_paths)
-            success, _output = await write_file_direct(path, body)
-            if success:
-                written.append(path)
+                messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You generate complete file contents for software projects. "
+                            "Reply with file content only. No markdown fences, no explanation."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": build_materialization_prompt(
+                            user_content,
+                            path,
+                            file_paths,
+                        ),
+                    },
+                ]
+                result = await llm.complete(messages, tools=None, max_tokens=4096)
+                body = ""
+                if not result.get("error"):
+                    body = result.get("content") or ""
+                body = prepare_deliverable_content(path, body, user_content, file_paths)
+                success, _output = await write_file_direct(path, body)
+                if success:
+                    written.append(path)
 
         if not written:
             return ""
@@ -754,16 +787,20 @@ class AgentOrchestrator:
 
     async def _guarantee_workspace_deliverables(
         self,
+        chat_id: str,
         user_content: str,
         intent: WorkspaceIntent,
         role_id: str = "developer",
+        on_event: Callable | None = None,
     ) -> str:
         """
         Ensure planned workspace files exist, using direct writes and scaffolds.
 
+        :param chat_id: Chat session ID
         :param user_content: Original user request
         :param intent: Parsed workspace intent
         :param role_id: Role used for model routing during content generation
+        :param on_event: Optional WebSocket callback
         :return: Summary of created files or empty string
         """
         if not intent.wants_file_creation:
@@ -774,20 +811,23 @@ class AgentOrchestrator:
         if not missing:
             return ""
 
-        summary = await self._materialize_missing_files(
-            user_content,
-            missing,
-            role_id=role_id,
-        )
-        still_missing = [path for path in missing if not file_exists_in_workspace(path)]
-        for path in still_missing:
-            body = prepare_deliverable_content(
-                path,
-                fallback_file_content(path, user_content),
+        role = role_registry.get_role(role_id)
+        agent_name = role.name if role else role_id
+        async with command_audit_scope(chat_id, role_id, agent_name, on_event):
+            summary = await self._materialize_missing_files(
                 user_content,
-                planned,
+                missing,
+                role_id=role_id,
             )
-            await write_file_direct(path, body)
+            still_missing = [path for path in missing if not file_exists_in_workspace(path)]
+            for path in still_missing:
+                body = prepare_deliverable_content(
+                    path,
+                    fallback_file_content(path, user_content),
+                    user_content,
+                    planned,
+                )
+                await write_file_direct(path, body)
 
         created = [path for path in planned if file_exists_in_workspace(path)]
         if not created:
@@ -842,9 +882,11 @@ class AgentOrchestrator:
             })
 
         content = await self._guarantee_workspace_deliverables(
+            chat_id,
             user_content,
             intent,
             role_id=developer.id,
+            on_event=on_event,
         )
         await self._emit_agent_end(on_event, developer.id, developer.name, round_num=0)
         if not content:
@@ -1087,9 +1129,11 @@ class AgentOrchestrator:
         still_missing = missing_requested_files(user_content, workspace_intent)
         if still_missing:
             fallback = await self._guarantee_workspace_deliverables(
+                chat_id,
                 user_content,
                 workspace_intent,
                 role_id=role_id,
+                on_event=on_event,
             )
             if fallback:
                 content = (
@@ -1099,9 +1143,11 @@ class AgentOrchestrator:
                 )
         else:
             fallback = await self._guarantee_workspace_deliverables(
+                chat_id,
                 user_content,
                 workspace_intent,
                 role_id=role_id,
+                on_event=on_event,
             )
             if fallback and self._is_weak_discussion_content(content):
                 content = fallback
@@ -1357,8 +1403,10 @@ class AgentOrchestrator:
                 if content.startswith("[ASK_USER]"):
                     if workspace_intent.wants_file_creation:
                         guarantee = await self._guarantee_workspace_deliverables(
+                            chat_id,
                             user_content,
                             workspace_intent,
+                            on_event=on_event,
                         )
                         if guarantee:
                             discussions.append(AgentMessage(
@@ -1381,8 +1429,10 @@ class AgentOrchestrator:
 
         final_role = role_registry.get_role("project_manager") or roles[-1]
         guarantee = await self._guarantee_workspace_deliverables(
+            chat_id,
             user_content,
             workspace_intent,
+            on_event=on_event,
         )
         if guarantee:
             discussions.append(AgentMessage(
@@ -1393,9 +1443,16 @@ class AgentOrchestrator:
             ))
             transcript.append(f"Developer: {guarantee}")
 
-        final_content = transcript[-1].split(": ", 1)[-1] if transcript else "No result"
-        if guarantee and guarantee not in final_content:
-            final_content = f"{guarantee}\n\n{final_content}"
+        deliverable_summary = build_deliverable_status_summary(
+            user_content,
+            workspace_intent,
+        )
+        if deliverable_summary and workspace_intent.wants_file_creation:
+            final_content = deliverable_summary
+        else:
+            final_content = transcript[-1].split(": ", 1)[-1] if transcript else "No result"
+            if guarantee and guarantee not in final_content:
+                final_content = f"{guarantee}\n\n{final_content}"
         if final_role:
             final_msg = await conversation_store.add_message(
                 chat_id,
@@ -1548,6 +1605,7 @@ class AgentOrchestrator:
 
     async def _recover_after_tool_limit(
         self,
+        chat_id: str,
         llm: LLMProvider,
         messages: list[dict],
         routing: dict,
@@ -1555,6 +1613,7 @@ class AgentOrchestrator:
         intent: WorkspaceIntent,
         user_content: str,
         role_id: str | None,
+        on_event: Callable | None = None,
     ) -> str:
         """
         Recover gracefully when an agent exhausts its tool iteration budget.
@@ -1574,10 +1633,12 @@ class AgentOrchestrator:
 
         still_missing = missing_requested_files(user_content, intent)
         if still_missing:
-            fallback = await self._materialize_missing_files(
+            fallback = await self._guarantee_workspace_deliverables(
+                chat_id,
                 user_content,
-                still_missing,
+                intent,
                 role_id=role_id or self.DEFAULT_SINGLE_ROLE,
+                on_event=on_event,
             )
             if fallback:
                 if summary:
@@ -1839,6 +1900,9 @@ class AgentOrchestrator:
             workspace_intent=intent,
         )
 
+        async def approval_cb(action_type: str, description: str, payload: dict) -> str:
+            return await approval_manager.request(chat_id, action_type, description, payload)
+
         if on_event:
             await on_event({
                 "type": "model_selected",
@@ -1847,212 +1911,199 @@ class AgentOrchestrator:
                 "routing": routing,
             })
 
-        for _ in range(tool_round_limit):
-            await self._ensure_not_cancelled()
-            await self._append_interventions_to_messages(
-                messages,
-                intervention_queue,
-                on_event,
-            )
-            if not tool_schemas:
-                content, model_used = await self._stream_llm_complete(
-                    llm,
+        audit_token = audit_context.set(
+            CommandAuditContext(
+                chat_id=chat_id,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                on_event=on_event,
+            ),
+        )
+
+        try:
+            for _ in range(tool_round_limit):
+                await self._ensure_not_cancelled()
+                await self._append_interventions_to_messages(
                     messages,
+                    intervention_queue,
                     on_event,
                 )
-                routing["model"] = model_used
-                return self._finalize_agent_content(content, tool_summaries), routing
+                if not tool_schemas:
+                    content, model_used = await self._stream_llm_complete(
+                        llm,
+                        messages,
+                        on_event,
+                    )
+                    routing["model"] = model_used
+                    return self._finalize_agent_content(content, tool_summaries), routing
 
-            result = await llm.complete(
-                messages,
-                tools=tool_schemas,
-                max_tokens=512 if mode_multi and role_id != "developer" else None,
-            )
-            if result.get("error"):
-                routing["model"] = result.get("model", routing.get("model"))
-                return (
-                    self._finalize_agent_content(
-                        result.get("content") or "LLM request failed.",
-                        tool_summaries,
-                    ),
-                    routing,
+                result = await llm.complete(
+                    messages,
+                    tools=tool_schemas,
+                    max_tokens=512 if mode_multi and role_id != "developer" else None,
                 )
-            tool_calls = result.get("tool_calls") or []
-            if not tool_calls:
-                tool_calls = self._parse_content_tool_calls(result.get("content") or "")
-
-            if not tool_calls:
-                content = result.get("content") or ""
-                if (
-                    intent.wants_file_creation
-                    and tool_schemas
-                    and code_output_nudges < 2
-                    and (
-                        self._looks_like_code_only_output(content)
-                        or self._is_weak_discussion_content(content)
-                    )
-                ):
-                    messages.append({"role": "assistant", "content": content})
-                    nudge = (
-                        self.EMPTY_RESPONSE_NUDGE
-                        if self._is_weak_discussion_content(content)
-                        else self.TOOL_USE_NUDGE
-                    )
-                    messages.append({"role": "user", "content": nudge})
-                    code_output_nudges += 1
-                    continue
-
-                routing["model"] = result.get("model", routing.get("model"))
-                return self._finalize_agent_content(content, tool_summaries), routing
-
-            assistant_msg: dict[str, Any] = {
-                "role": "assistant",
-                "content": result.get("content") or "",
-                "tool_calls": [
-                    {
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["name"],
-                            "arguments": tc["arguments"],
-                        },
-                    }
-                    for tc in tool_calls
-                ],
-            }
-            messages.append(assistant_msg)
-
-            unknown_tool_count = 0
-            for tc in tool_calls:
-                if on_event:
-                    await on_event({
-                        "type": "tool_call",
-                        "agent_id": agent_id,
-                        "tool": tc["name"],
-                        "arguments": tc["arguments"],
-                    })
-
-                tool_result = await tools.execute(tc["name"], tc["arguments"])
-
-                if tc["name"] == "run_command":
-                    command, cwd = self._parse_run_command_arguments(tc["arguments"])
-                    if tool_result.requires_approval and tool_result.approval_id:
-                        if on_event:
-                            await on_event({
-                                "type": "shell_command_pending",
-                                "approval_id": tool_result.approval_id,
-                                "command": command,
-                                "cwd": cwd,
-                                "agent_id": agent_id,
-                                "agent_name": agent_name,
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                            })
-                    elif command:
-                        status, exit_code = self._shell_status_from_output(
-                            tool_result.output,
-                            success=tool_result.success,
-                        )
-                        recorded = await self._record_shell_command(
-                            chat_id,
-                            command=command,
-                            cwd=cwd,
-                            status=status,
-                            success=tool_result.success,
-                            exit_code=exit_code,
-                            output=tool_result.output,
-                            agent_id=agent_id,
-                            agent_name=agent_name,
-                        )
-                        if on_event:
-                            await on_event({
-                                "type": "shell_command_recorded",
-                                "entry": self._serialize_shell_command_entry(recorded),
-                            })
-
-                if tool_result.success:
-                    summary = self._summarize_tool_call(
-                        tc["name"],
-                        tc["arguments"],
-                        tool_result.output,
-                    )
-                    if summary:
-                        tool_summaries.append(summary)
-
-                if (
-                    not tool_result.success
-                    and tool_result.output.startswith("Unknown tool:")
-                ):
-                    unknown_tool_count += 1
-
-                if tool_result.requires_approval:
-                    approval_id = tool_result.approval_id
-                    if approval_id:
-                        approval_manager.set_resume_state(
-                            approval_id,
-                            ApprovalResumeState(
-                                chat_id=chat_id,
-                                agent_id=agent_id,
-                                agent_name=agent_name,
-                                role_id=role_id or self.DEFAULT_SINGLE_ROLE,
-                                user_content=user_content,
-                                mode_single=mode_single,
-                                memory_scope=memory_scope,
-                                routing=copy.deepcopy(routing),
-                                messages=copy.deepcopy(messages),
-                                tool_call_id=tc["id"],
-                            ),
-                        )
-                    command_preview: str
-                    try:
-                        parsed_arguments = json.loads(tc["arguments"])
-                        command_preview = str(
-                            parsed_arguments.get("command", tc["arguments"])
-                        )
-                    except json.JSONDecodeError:
-                        command_preview = tc["arguments"]
+                if result.get("error"):
+                    routing["model"] = result.get("model", routing.get("model"))
                     return (
-                        f"I need your approval to run: "
-                        f"{command_preview}. "
-                        f"Please approve or deny in the approvals panel."
-                    ), routing
+                        self._finalize_agent_content(
+                            result.get("content") or "LLM request failed.",
+                            tool_summaries,
+                        ),
+                        routing,
+                    )
+                tool_calls = result.get("tool_calls") or []
+                if not tool_calls:
+                    tool_calls = self._parse_content_tool_calls(result.get("content") or "")
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": tool_result.output,
-                })
+                if not tool_calls:
+                    content = result.get("content") or ""
+                    if (
+                        intent.wants_file_creation
+                        and tool_schemas
+                        and code_output_nudges < 2
+                        and (
+                            self._looks_like_code_only_output(content)
+                            or self._is_weak_discussion_content(content)
+                        )
+                    ):
+                        messages.append({"role": "assistant", "content": content})
+                        nudge = (
+                            self.EMPTY_RESPONSE_NUDGE
+                            if self._is_weak_discussion_content(content)
+                            else self.TOOL_USE_NUDGE
+                        )
+                        messages.append({"role": "user", "content": nudge})
+                        code_output_nudges += 1
+                        continue
 
-                if on_event:
-                    await on_event({
-                        "type": "tool_result",
-                        "agent_id": agent_id,
-                        "tool": tc["name"],
-                        "success": tool_result.success,
-                        "output": tool_result.output[:500],
+                    routing["model"] = result.get("model", routing.get("model"))
+                    return self._finalize_agent_content(content, tool_summaries), routing
+
+                assistant_msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": result.get("content") or "",
+                    "tool_calls": [
+                        {
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tc["name"],
+                                "arguments": tc["arguments"],
+                            },
+                        }
+                        for tc in tool_calls
+                    ],
+                }
+                messages.append(assistant_msg)
+
+                unknown_tool_count = 0
+                for tc in tool_calls:
+                    if on_event:
+                        await on_event({
+                            "type": "tool_call",
+                            "agent_id": agent_id,
+                            "tool": tc["name"],
+                            "arguments": tc["arguments"],
+                        })
+
+                    tool_result = await self._execute_tool_call(
+                        chat_id=chat_id,
+                        tools=tools,
+                        tool_call=tc,
+                        approval_cb=approval_cb,
+                        agent_id=agent_id,
+                        agent_name=agent_name,
+                        on_event=on_event,
+                    )
+
+                    if tool_result.success:
+                        summary = self._summarize_tool_call(
+                            tc["name"],
+                            tc["arguments"],
+                            tool_result.output,
+                        )
+                        if summary:
+                            tool_summaries.append(summary)
+
+                    if (
+                        not tool_result.success
+                        and tool_result.output.startswith("Unknown tool:")
+                    ):
+                        unknown_tool_count += 1
+
+                    if tool_result.requires_approval:
+                        approval_id = tool_result.approval_id
+                        if approval_id:
+                            approval_manager.set_resume_state(
+                                approval_id,
+                                ApprovalResumeState(
+                                    chat_id=chat_id,
+                                    agent_id=agent_id,
+                                    agent_name=agent_name,
+                                    role_id=role_id or self.DEFAULT_SINGLE_ROLE,
+                                    user_content=user_content,
+                                    mode_single=mode_single,
+                                    memory_scope=memory_scope,
+                                    routing=copy.deepcopy(routing),
+                                    messages=copy.deepcopy(messages),
+                                    tool_call_id=tc["id"],
+                                ),
+                            )
+                        command_preview: str
+                        try:
+                            parsed_arguments = json.loads(tc["arguments"])
+                            command_preview = str(
+                                parsed_arguments.get("command", tc["arguments"])
+                            )
+                        except json.JSONDecodeError:
+                            command_preview = tc["arguments"]
+                        return (
+                            f"I need your approval to run: "
+                            f"{command_preview}. "
+                            f"Please approve or deny in the approvals panel."
+                        ), routing
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": tool_result.output,
                     })
 
-            if unknown_tool_count == len(tool_calls):
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "Those tools are not available. "
-                        "Answer the user directly in plain text without calling tools."
-                    ),
-                })
-                fallback = await llm.complete(messages, tools=None)
-                if fallback.get("error"):
+                    if on_event:
+                        await on_event({
+                            "type": "tool_result",
+                            "agent_id": agent_id,
+                            "tool": tc["name"],
+                            "success": tool_result.success,
+                            "output": tool_result.output[:500],
+                        })
+
+                if unknown_tool_count == len(tool_calls):
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "Those tools are not available. "
+                            "Answer the user directly in plain text without calling tools."
+                        ),
+                    })
+                    fallback = await llm.complete(messages, tools=None)
+                    if fallback.get("error"):
+                        routing["model"] = fallback.get("model", routing.get("model"))
+                        return fallback.get("content") or "LLM request failed.", routing
                     routing["model"] = fallback.get("model", routing.get("model"))
-                    return fallback.get("content") or "LLM request failed.", routing
-                routing["model"] = fallback.get("model", routing.get("model"))
-                return (
-                    self._finalize_agent_content(
-                        fallback.get("content") or "",
-                        tool_summaries,
-                    ),
-                    routing,
+                    return (
+                        self._finalize_agent_content(
+                            fallback.get("content") or "",
+                            tool_summaries,
+                        ),
+                        routing,
                 )
+
+        finally:
+            audit_context.reset(audit_token)
 
         recovery_content = await self._recover_after_tool_limit(
+            chat_id=chat_id,
             llm=llm,
             messages=messages,
             routing=routing,
@@ -2060,8 +2111,66 @@ class AgentOrchestrator:
             intent=intent,
             user_content=user_content,
             role_id=role_id,
+            on_event=on_event,
         )
         return recovery_content, routing
+
+    @staticmethod
+    def _parse_run_command_arguments(arguments: str) -> tuple[str, str | None]:
+        """
+        Parse run_command tool arguments.
+
+        :param arguments: JSON-encoded tool arguments
+        :return: Command string and optional relative cwd
+        """
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            return arguments.strip(), None
+        command = str(parsed.get("command", "")).strip()
+        cwd = parsed.get("cwd")
+        return command, str(cwd).strip() if cwd else None
+
+    async def _execute_tool_call(
+        self,
+        chat_id: str,
+        tools: ToolRegistry,
+        tool_call: dict[str, Any],
+        approval_cb: Callable[[str, str, dict], Awaitable[str]],
+        agent_id: str,
+        agent_name: str,
+        on_event: Callable | None,
+    ) -> ToolCallResult:
+        """
+        Execute one tool call through the central command audit gateway when needed.
+
+        :param chat_id: Chat session ID
+        :param tools: Tool registry
+        :param tool_call: Tool call payload from the LLM
+        :param approval_cb: Approval callback for shell commands
+        :param agent_id: Agent role identifier
+        :param agent_name: Agent display name
+        :param on_event: Optional WebSocket callback
+        :return: Tool execution result
+        """
+        if tool_call.get("name") == "run_command":
+            command, cwd = self._parse_run_command_arguments(tool_call.get("arguments", ""))
+            if not command:
+                return ToolCallResult(
+                    tool="run_command",
+                    success=False,
+                    output="Empty shell command.",
+                )
+            return await execute_shell_command(
+                chat_id,
+                command=command,
+                cwd=cwd,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                approval_callback=approval_cb,
+                on_event=on_event,
+            )
+        return await tools.execute(tool_call["name"], tool_call["arguments"])
 
     async def _resume_after_approval(
         self,
@@ -2113,119 +2222,6 @@ class AgentOrchestrator:
             intervention_queue=None,
         )
 
-    @staticmethod
-    def _parse_run_command_arguments(arguments: str) -> tuple[str, str | None]:
-        """
-        Parse run_command tool arguments.
-
-        :param arguments: JSON-encoded tool arguments
-        :return: Command string and optional relative cwd
-        """
-        try:
-            parsed = json.loads(arguments)
-        except json.JSONDecodeError:
-            return arguments.strip(), None
-        command = str(parsed.get("command", "")).strip()
-        cwd = parsed.get("cwd")
-        return command, str(cwd).strip() if cwd else None
-
-    @staticmethod
-    def _shell_status_from_output(output: str, *, success: bool) -> tuple[str, int | None]:
-        """
-        Derive shell command status and exit code from tool output.
-
-        :param output: Tool execution output
-        :param success: Tool success flag
-        :return: Status label and optional exit code
-        """
-        lowered = output.lower()
-        if "is blocked" in lowered or lowered.startswith("invalid command"):
-            return "blocked", None
-        if lowered.startswith("awaiting approval") or lowered.startswith("approval required"):
-            return "pending", None
-        ok_match = re.match(r"^\[OK\]", output)
-        if ok_match:
-            return "success", 0
-        exit_match = re.match(r"^\[Exit (\d+)\]", output)
-        if exit_match:
-            exit_code = int(exit_match.group(1))
-            return ("success" if exit_code == 0 else "failed"), exit_code
-        return ("success" if success else "failed"), None
-
-    async def _record_shell_command(
-        self,
-        chat_id: str,
-        *,
-        command: str,
-        cwd: str | None,
-        status: str,
-        success: bool,
-        exit_code: int | None,
-        output: str,
-        agent_id: str | None,
-        agent_name: str | None,
-        approval_id: str | None = None,
-    ) -> MessageResponse:
-        """
-        Persist a shell command execution record for the command history UI.
-
-        :param chat_id: Chat session ID
-        :param command: Executed shell command
-        :param cwd: Optional relative working directory
-        :param status: Status label (success, failed, blocked, denied, pending)
-        :param success: Whether execution succeeded
-        :param exit_code: Optional process exit code
-        :param output: Command output text
-        :param agent_id: Agent role identifier
-        :param agent_name: Agent display name
-        :param approval_id: Optional approval identifier
-        :return: Stored message response
-        """
-        metadata: dict[str, Any] = {
-            "kind": "shell_command",
-            "command": command,
-            "status": status,
-            "success": success,
-        }
-        if cwd:
-            metadata["cwd"] = cwd
-        if exit_code is not None:
-            metadata["exit_code"] = exit_code
-        if approval_id:
-            metadata["approval_id"] = approval_id
-
-        return await conversation_store.add_message(
-            chat_id,
-            MessageRole.TOOL,
-            output[: settings.max_output_chars] if output else "",
-            agent_id=agent_id,
-            agent_name=agent_name,
-            metadata=metadata,
-        )
-
-    @staticmethod
-    def _serialize_shell_command_entry(message: MessageResponse) -> dict[str, Any]:
-        """
-        Serialize a shell command message for WebSocket clients.
-
-        :param message: Stored message response
-        :return: JSON-serializable command entry
-        """
-        metadata = message.metadata or {}
-        return {
-            "id": message.id,
-            "command": metadata.get("command", ""),
-            "cwd": metadata.get("cwd"),
-            "status": metadata.get("status", "success" if metadata.get("success") else "failed"),
-            "success": bool(metadata.get("success")),
-            "exit_code": metadata.get("exit_code"),
-            "agent_id": message.agent_id,
-            "agent_name": message.agent_name,
-            "approval_id": metadata.get("approval_id"),
-            "output": message.content,
-            "timestamp": message.created_at.isoformat(),
-        }
-
     async def execute_approved_command(
         self,
         chat_id: str,
@@ -2238,7 +2234,7 @@ class AgentOrchestrator:
         if not target or not response.approved:
             if target and target.action_type == "command":
                 command = str(target.payload.get("command", "")).strip()
-                denied = await self._record_shell_command(
+                denied = await record_command(
                     chat_id,
                     command=command,
                     cwd=target.payload.get("cwd"),
@@ -2258,34 +2254,40 @@ class AgentOrchestrator:
             return None
 
         await approval_manager.respond(approval_id, response)
-        import asyncio
+        command = str(target.payload.get("command", "")).strip()
+        cwd_value = target.payload.get("cwd")
+        classification = classify_shell_command(command)
+        if not classification.allowed:
+            tool_msg = await record_command(
+                chat_id,
+                command=command,
+                cwd=cwd_value,
+                status="blocked",
+                success=False,
+                exit_code=None,
+                output=classification.reason,
+                agent_id=None,
+                agent_name=None,
+                approval_id=approval_id,
+            )
+            approval_manager.pop_resume_state(approval_id)
+            return tool_msg
 
-        command = target.payload.get("command", "")
         cwd = settings.workspace_root
-        if target.payload.get("cwd"):
-            from agentforge.tools.registry import _resolve_path
-            cwd = _resolve_path(target.payload["cwd"])
+        if cwd_value:
+            cwd = _resolve_path(str(cwd_value))
 
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            cwd=str(cwd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        output = stdout.decode(errors="replace") + stderr.decode(errors="replace")
-        trimmed_output = output[:settings.max_output_chars]
-        exit_code = proc.returncode
-        command_status = "success" if exit_code == 0 else "failed"
+        success, exit_code, formatted_output = await run_shell_command(command, cwd)
+        command_status = "success" if success else "failed"
 
-        tool_msg = await self._record_shell_command(
+        tool_msg = await record_command(
             chat_id,
             command=command,
-            cwd=target.payload.get("cwd"),
+            cwd=cwd_value,
             status=command_status,
-            success=exit_code == 0,
+            success=success,
             exit_code=exit_code,
-            output=f"[{'OK' if exit_code == 0 else f'Exit {exit_code}'}]\n{trimmed_output}".strip(),
+            output=formatted_output,
             agent_id=None,
             agent_name=None,
             approval_id=approval_id,
@@ -2313,7 +2315,7 @@ class AgentOrchestrator:
         try:
             resumed_content, resumed_routing = await self._resume_after_approval(
                 resume_state,
-                f"[OK]\n{trimmed_output}".strip(),
+                formatted_output,
             )
         except Exception:
             return await conversation_store.add_message(

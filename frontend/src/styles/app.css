@@ -331,6 +331,70 @@ body {
   color: var(--text-muted);
 }
 
+.settings-shell-commands h4,
+.settings-shell-commands h5 {
+  margin: 0 0 8px;
+}
+
+.settings-shell-commands-hint,
+.settings-shell-command-rules {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.settings-shell-command-rules ul {
+  margin: 8px 0 0;
+  padding-left: 1.2rem;
+}
+
+.settings-shell-command-group {
+  margin-bottom: 16px;
+}
+
+.settings-shell-command-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.settings-shell-command-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono, monospace);
+}
+
+.settings-shell-command-badges--allowed .settings-shell-command-badge {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.settings-shell-command-badges--blocked .settings-shell-command-badge {
+  background: color-mix(in srgb, var(--danger, #c0392b) 12%, transparent);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--danger, #c0392b) 35%, var(--border));
+}
+
+.settings-shell-command-group textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
 .sidebar-shell {
   flex-shrink: 0;
   min-width: 220px;
@@ -1290,12 +1354,20 @@ body.sidebar-resizing {
 }
 
 .modal.settings-modal {
-  width: 560px;
-  min-width: 560px;
-  max-width: 560px;
-  height: min(640px, 85vh);
-  min-height: min(640px, 85vh);
-  max-height: min(640px, 85vh);
+  min-width: 420px;
+  min-height: 320px;
+  max-width: min(95vw, 1400px);
+  max-height: 95vh;
+  resize: both;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.modal.settings-modal::-webkit-resizer {
+  border-width: 2px;
+  border-style: solid;
+  border-color: transparent var(--border) var(--border) transparent;
+  background: linear-gradient(135deg, transparent 0 45%, var(--text-muted) 45% 55%, transparent 55% 100%);
 }
 
 .modal.settings-modal .modal-body {

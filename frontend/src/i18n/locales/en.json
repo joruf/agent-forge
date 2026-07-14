@@ -149,8 +149,20 @@
       "cloud": "Cloud",
       "memory": "Memory",
       "context": "Context",
-      "agents": "Agents"
-    }
+      "agents": "Agents",
+      "security": "Security"
+    },
+    "shellCommandsTitle": "Console commands",
+    "shellCommandsHint": "Control which shell commands agents may run in your workspace.",
+    "shellCommandsRulesIntro": "Rules for run_command:",
+    "shellCommandsRuleWhitelist": "Allowed commands run automatically and are logged in the chat command history.",
+    "shellCommandsRuleBlacklist": "Blocked commands are never executed and are logged as blocked.",
+    "shellCommandsRuleApproval": "All other commands require your approval before execution.",
+    "shellCommandsWhitelist": "Allowed commands",
+    "shellCommandsWhitelistEdit": "Edit allowed commands (one per line)",
+    "shellCommandsBlacklist": "Blocked commands",
+    "shellCommandsBlacklistEdit": "Edit blocked commands (one per line)",
+    "resizeHint": "Drag the bottom-right corner to resize this dialog"
   },
   "about": {
     "title": "About AgentForge",

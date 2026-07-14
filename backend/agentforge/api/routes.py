@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from agentforge.agents.approval_manager import approval_manager
 from agentforge.agents.orchestrator import AgentOrchestrator
+from agentforge.services.command_audit import serialize_shell_command_entry
 from agentforge.agents.role_registry import role_registry
 from agentforge.config import settings
 from agentforge.llm.model_catalog import model_catalog
@@ -683,7 +684,7 @@ async def respond_approval(chat_id: str, approval_id: str, data: ApprovalRespons
             chat_id,
             {
                 "type": "shell_command_recorded",
-                "entry": AgentOrchestrator._serialize_shell_command_entry(msg),
+                "entry": serialize_shell_command_entry(msg),
             },
         )
     return {"approved": data.approved, "message": msg}

@@ -1,7 +1,6 @@
 """Tool definitions for agent actions."""
 
 import json
-import shlex
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -40,6 +39,25 @@ def _resolve_path(relative_path: str) -> Path:
     if not str(target).startswith(str(root)):
         raise PermissionError("Path escapes workspace root")
     return target
+
+
+def _parents_to_create(relative_path: str) -> list[str]:
+    """
+    Return workspace-relative directories that do not exist yet for a file path.
+
+    :param relative_path: Target workspace-relative file path
+    :return: Ordered directory paths to create
+    """
+    root = settings.workspace_root.resolve()
+    target = _resolve_path(relative_path)
+    missing: list[str] = []
+    current = target.parent
+    while str(current).startswith(str(root)) and current != root:
+        if not current.exists():
+            missing.append(str(current.relative_to(root)))
+        current = current.parent
+    missing.reverse()
+    return missing
 
 
 class ReadFileTool(BaseTool):
@@ -153,13 +171,32 @@ class WriteFileTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> ToolCallResult:
         """Write file contents."""
+        from agentforge.services.command_audit import record_write_file
+
+        relative_path = str(arguments["path"])
         try:
-            path = _resolve_path(arguments["path"])
+            created_dirs = _parents_to_create(relative_path)
+            path = _resolve_path(relative_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(arguments["content"], encoding="utf-8")
-            return ToolCallResult(tool=self.name, success=True, output=f"Written: {path}")
+            output = f"Written: {path}"
+            result = ToolCallResult(tool=self.name, success=True, output=output)
+            await record_write_file(
+                relative_path,
+                output=output,
+                success=True,
+                created_dirs=created_dirs,
+            )
+            return result
         except Exception as exc:
-            return ToolCallResult(tool=self.name, success=False, output=str(exc))
+            output = str(exc)
+            await record_write_file(
+                relative_path,
+                output=output,
+                success=False,
+                created_dirs=_parents_to_create(relative_path),
+            )
+            return ToolCallResult(tool=self.name, success=False, output=output)
 
 
 class SearchFilesTool(BaseTool):
@@ -377,7 +414,11 @@ class ListDirectoryTool(BaseTool):
 
 
 class ShellTool(BaseTool):
-    """Execute shell commands with whitelist and approval."""
+    """
+    Shell command tool stub.
+
+    Runtime execution is handled centrally by command_audit.execute_shell_command.
+    """
 
     name = "run_command"
     description = "Run an allowed shell command in the workspace"
@@ -404,82 +445,13 @@ class ShellTool(BaseTool):
             },
         }
 
-    def _check_command(self, command: str) -> tuple[bool, bool, str]:
-        """
-        Validate command against whitelist/blacklist.
-
-        :return: (allowed, needs_approval, reason)
-        """
-        try:
-            parts = shlex.split(command)
-        except ValueError:
-            return False, False, "Invalid command syntax"
-        if not parts:
-            return False, False, "Empty command"
-
-        base = Path(parts[0]).name
-        if base in settings.command_blacklist:
-            return False, False, f"Command '{base}' is blocked"
-
-        if base in settings.command_whitelist:
-            return True, False, "Whitelisted"
-
-        return True, True, t("tools.approval_required", command=base)
-
     async def execute(self, arguments: dict[str, Any]) -> ToolCallResult:
-        """Run command if permitted."""
-        import asyncio
-
-        command = arguments["command"]
-        allowed, needs_approval, reason = self._check_command(command)
-
-        if not allowed:
-            return ToolCallResult(tool=self.name, success=False, output=reason)
-
-        if needs_approval:
-            if self.approval_callback:
-                approval_id = await self.approval_callback(
-                    "command",
-                    t("tools.execute_command", command=command),
-                    {"command": command, "cwd": arguments.get("cwd")},
-                )
-                return ToolCallResult(
-                    tool=self.name,
-                    success=False,
-                    output=f"Awaiting approval: {reason}",
-                    requires_approval=True,
-                    approval_id=approval_id,
-                )
-            return ToolCallResult(
-                tool=self.name,
-                success=False,
-                output=f"Approval required: {reason}",
-                requires_approval=True,
-            )
-
-        cwd = settings.workspace_root
-        if arguments.get("cwd"):
-            cwd = _resolve_path(arguments["cwd"])
-
-        try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                cwd=str(cwd),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-            output = stdout.decode(errors="replace") + stderr.decode(errors="replace")
-            if len(output) > settings.max_output_chars:
-                output = output[: settings.max_output_chars] + "\n... [truncated]"
-            status = "OK" if proc.returncode == 0 else f"Exit {proc.returncode}"
-            return ToolCallResult(
-                tool=self.name,
-                success=proc.returncode == 0,
-                output=f"[{status}]\n{output}".strip(),
-            )
-        except Exception as exc:
-            return ToolCallResult(tool=self.name, success=False, output=str(exc))
+        """Shell execution must go through command_audit.execute_shell_command."""
+        return ToolCallResult(
+            tool=self.name,
+            success=False,
+            output="Shell execution must go through the central command audit service.",
+        )
 
 
 class RememberTool(BaseTool):

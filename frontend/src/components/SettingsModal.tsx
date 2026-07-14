@@ -12,6 +12,7 @@ import type { ThemeMode } from "../hooks/useTheme";
 import { LOCALES, type Locale } from "../i18n";
 import { useI18n } from "../hooks/useI18n";
 import { useEscapeClose } from "../hooks/useEscapeClose";
+import { useSettingsModalSize } from "../hooks/useSettingsModalSize";
 import { DEFAULT_MEMORY_TOKENS, normalizeMemoryTokens, type MemoryTokenOption } from "../constants/memory";
 import { MemoryTokenSelect } from "./MemoryTokenSelect";
 import { TestResultsList } from "./TestResultsList";
@@ -45,9 +46,20 @@ const CLOUD_KEY_FIELDS: Array<{
   { field: "mistral_api_key", labelKey: "settings.mistralKey", hasKeyField: "has_mistral_key", placeholder: "..." },
 ];
 
-type SettingsTabId = "general" | "models" | "cloud" | "memory" | "context" | "agents";
+type SettingsTabId = "general" | "models" | "cloud" | "memory" | "context" | "agents" | "security";
 
-const SETTINGS_TABS: SettingsTabId[] = ["general", "models", "cloud", "memory", "context", "agents"];
+const SETTINGS_TABS: SettingsTabId[] = ["general", "models", "cloud", "memory", "context", "agents", "security"];
+
+function parseCommandList(value: string): string[] {
+  return value
+    .split(/[\n,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function formatCommandList(commands: string[]): string {
+  return commands.join("\n");
+}
 
 export function SettingsModal({
   settings,
@@ -64,6 +76,7 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const { t } = useI18n();
   const formRef = useRef<HTMLFormElement>(null);
+  const { modalRef, modalSizeStyle } = useSettingsModalSize(open);
   const [defaultMemoryTokens, setDefaultMemoryTokens] = useState<MemoryTokenOption>(DEFAULT_MEMORY_TOKENS);
   const [autoRouting, setAutoRouting] = useState(true);
   const [testInference, setTestInference] = useState(true);
@@ -74,6 +87,8 @@ export function SettingsModal({
   const [enabledContextPlugins, setEnabledContextPlugins] = useState<string[]>([]);
   const [contextPluginsError, setContextPluginsError] = useState("");
   const [activeTab, setActiveTab] = useState<SettingsTabId>("general");
+  const [commandWhitelist, setCommandWhitelist] = useState("");
+  const [commandBlacklist, setCommandBlacklist] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -85,6 +100,8 @@ export function SettingsModal({
     if (settings) {
       setDefaultMemoryTokens(normalizeMemoryTokens(settings.default_memory_tokens));
       setAutoRouting(settings.llm_auto_routing);
+      setCommandWhitelist(formatCommandList(settings.command_whitelist));
+      setCommandBlacklist(formatCommandList(settings.command_blacklist));
     }
   }, [settings]);
 
@@ -151,6 +168,8 @@ export function SettingsModal({
       default_memory_tokens: defaultMemoryTokens,
       llm_auto_routing: autoRouting,
       ui_language: locale,
+      command_whitelist: parseCommandList(commandWhitelist),
+      command_blacklist: parseCommandList(commandBlacklist),
     };
     for (const entry of CLOUD_KEY_FIELDS) {
       const value = String(form.get(entry.field) ?? "").trim();
@@ -184,7 +203,13 @@ export function SettingsModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal settings-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className="modal settings-modal"
+        style={modalSizeStyle}
+        onClick={(e) => e.stopPropagation()}
+        title={t("settings.resizeHint")}
+      >
         <h2>{t("settings.title")}</h2>
         <form ref={formRef} className="modal-form" onSubmit={handleSubmit}>
           <div
@@ -398,6 +423,64 @@ export function SettingsModal({
               ))}
             </ul>
           </div>
+          </div>
+          <div
+            id="settings-panel-security"
+            role="tabpanel"
+            aria-labelledby="settings-tab-security"
+            hidden={activeTab !== "security"}
+            className="settings-tab-panel"
+          >
+          <section className="settings-shell-commands">
+            <h4>{t("settings.shellCommandsTitle")}</h4>
+            <p className="settings-shell-commands-hint">{t("settings.shellCommandsHint")}</p>
+            <div className="settings-shell-command-rules">
+              <p>{t("settings.shellCommandsRulesIntro")}</p>
+              <ul>
+                <li>{t("settings.shellCommandsRuleWhitelist")}</li>
+                <li>{t("settings.shellCommandsRuleBlacklist")}</li>
+                <li>{t("settings.shellCommandsRuleApproval")}</li>
+              </ul>
+            </div>
+            <div className="settings-shell-command-group">
+              <h5>{t("settings.shellCommandsWhitelist")}</h5>
+              <div className="settings-shell-command-badges settings-shell-command-badges--allowed">
+                {parseCommandList(commandWhitelist).map((command) => (
+                  <span key={`allowed-${command}`} className="settings-shell-command-badge">
+                    {command}
+                  </span>
+                ))}
+              </div>
+              <label>
+                {t("settings.shellCommandsWhitelistEdit")}
+                <textarea
+                  value={commandWhitelist}
+                  onChange={(event) => setCommandWhitelist(event.target.value)}
+                  rows={8}
+                  spellCheck={false}
+                />
+              </label>
+            </div>
+            <div className="settings-shell-command-group">
+              <h5>{t("settings.shellCommandsBlacklist")}</h5>
+              <div className="settings-shell-command-badges settings-shell-command-badges--blocked">
+                {parseCommandList(commandBlacklist).map((command) => (
+                  <span key={`blocked-${command}`} className="settings-shell-command-badge">
+                    {command}
+                  </span>
+                ))}
+              </div>
+              <label>
+                {t("settings.shellCommandsBlacklistEdit")}
+                <textarea
+                  value={commandBlacklist}
+                  onChange={(event) => setCommandBlacklist(event.target.value)}
+                  rows={8}
+                  spellCheck={false}
+                />
+              </label>
+            </div>
+          </section>
           </div>
           </div>
           <div className="modal-actions">

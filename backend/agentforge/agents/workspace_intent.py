@@ -103,6 +103,34 @@ CODE_EXTENSIONS = re.compile(
     r"\.\w{1,10}\b",
 )
 
+NAMED_FOLDER = re.compile(
+    r"(?:"
+    r"(?:ordner|verzeichnis|folder|directory)"
+    r"(?:\s+(?:mit\s+(?:dem\s+)?)?namen)?"
+    r"|"
+    r"(?:folder|directory|ordner|verzeichnis)\s+(?:named|called|genannt)"
+    r")"
+    r"[\s.:,]*"
+    r"([\w.-]+)",
+    re.IGNORECASE,
+)
+
+
+def extract_named_folder(user_content: str) -> str | None:
+    """
+    Extract a folder name from natural-language create-directory requests.
+
+    :param user_content: User message text
+    :return: Folder basename or None
+    """
+    match = NAMED_FOLDER.search(user_content or "")
+    if not match:
+        return None
+    name = match.group(1).strip().strip(".")
+    if not name or name.lower() in {"mit", "dem", "namen", "name", "der", "die", "das"}:
+        return None
+    return name
+
 
 def _to_workspace_relative(path_str: str) -> tuple[str | None, str | None]:
     """
@@ -194,6 +222,33 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
     )
     wants_file_creation = wants_create or bool(save_phrase and raw_paths)
     wants_directory_creation = wants_file_creation and bool(target_dirs)
+
+    named_folder = extract_named_folder(text)
+    if named_folder and target_dirs:
+        enriched_dirs: list[str] = []
+        enriched_paths: list[str] = []
+        for directory in target_dirs:
+            combined = f"{directory}/{named_folder}"
+            if combined not in enriched_dirs:
+                enriched_dirs.append(combined)
+        for relative in target_paths:
+            path = Path(relative)
+            if path.suffix:
+                parent = str(path.parent)
+                if parent in {"", "."}:
+                    combined = f"{target_dirs[0]}/{named_folder}/{path.name}"
+                else:
+                    combined = f"{parent}/{named_folder}/{path.name}"
+                if combined not in enriched_paths:
+                    enriched_paths.append(combined)
+            else:
+                combined = f"{relative}/{named_folder}"
+                if combined not in enriched_dirs:
+                    enriched_dirs.append(combined)
+        if enriched_dirs:
+            target_dirs = enriched_dirs
+        if enriched_paths:
+            target_paths = enriched_paths
 
     return WorkspaceIntent(
         wants_file_creation=wants_file_creation,
