@@ -7,7 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agentforge.api.routes import router
 from agentforge.config import settings
+from agentforge.llm.litellm_compat import ensure_litellm_proxy_package
 from agentforge.storage.conversation_store import conversation_store
+
+ensure_litellm_proxy_package()
 
 
 @asynccontextmanager

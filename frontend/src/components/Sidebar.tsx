@@ -142,11 +142,11 @@ export function Sidebar({
               <button type="button" className="sidebar-menu-item" role="menuitem" onClick={handleOpenSettings}>
                 {t("sidebar.properties")}
               </button>
-              <button type="button" className="sidebar-menu-item" role="menuitem" onClick={handleOpenManual}>
-                {t("sidebar.userManual")}
-              </button>
               <button type="button" className="sidebar-menu-item" role="menuitem" onClick={handleOpenModels}>
                 {t("sidebar.manageModels")}
+              </button>
+              <button type="button" className="sidebar-menu-item" role="menuitem" onClick={handleOpenManual}>
+                {t("sidebar.userManual")}
               </button>
               <button type="button" className="sidebar-menu-item" role="menuitem" onClick={handleOpenAbout}>
                 {t("sidebar.about")}

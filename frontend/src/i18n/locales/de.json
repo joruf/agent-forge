@@ -6,6 +6,31 @@
     "reconnect": "Erneut verbinden",
     "sidebarResize": "Menübreite anpassen"
   },
+  "readiness": {
+    "title": "Modelle nicht bereit",
+    "activeModel": "Aktives Modell: {{model}}",
+    "recheck": "Erneut prüfen",
+    "checking": "Prüfe…",
+    "openSettings": "Einstellungen",
+    "showDetails": "Details anzeigen",
+    "hideDetails": "Details ausblenden",
+    "chatBlocked": "Chat ist deaktiviert, bis die Modell-Prüfung erfolgreich ist."
+  },
+  "context": {
+    "title": "Kontext beim Start",
+    "chatTitle": "Context-Plugins",
+    "showPlugins": "Plugins anzeigen",
+    "hidePlugins": "Plugins ausblenden",
+    "noApiKey": "Kein API-Key",
+    "apiKeyRequired": "API-Key nötig",
+    "running": "läuft…",
+    "executed": "ausgeführt",
+    "failed": "fehlgeschlagen",
+    "loadingPlugin": "Plugin wird geladen…",
+    "reasonIntent": "Ausgelöst durch deine Nachricht",
+    "reasonProcess": "Ausgelöst durch den KI-Prozess",
+    "pluginLabel": "Plugin {{name}}"
+  },
   "sidebar": {
     "settings": "Einstellungen",
     "menu": "Menü",
@@ -64,6 +89,22 @@
     "inputPlaceholderMultiActive": "In die Diskussion einsteigen… (Enter senden, Shift+Enter oder Strg+Enter neue Zeile)",
     "send": "Senden"
   },
+  "shellCommands": {
+    "open": "Konsolenbefehle anzeigen",
+    "openWithCount": "Konsolenbefehle anzeigen ({{count}} ausgeführt)",
+    "title": "Konsolenbefehle",
+    "close": "Schließen",
+    "empty": "In diesem Chat wurden noch keine Shell-Befehle ausgeführt.",
+    "cwd": "Verzeichnis: {{cwd}}",
+    "exitCode": "Exit {{code}}",
+    "status": {
+      "success": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "blocked": "Blockiert",
+      "pending": "Wartet auf Freigabe",
+      "denied": "Abgelehnt"
+    }
+  },
   "settings": {
     "title": "Einstellungen",
     "workspaceRoot": "Arbeitsverzeichnis",
@@ -79,6 +120,9 @@
     "cloudProvidersHint": "Optionale API-Keys für OpenAI, Claude, Gemini, Groq und Mistral. Als Standard-Modell LiteLLM-IDs verwenden, z. B. anthropic/claude-3-5-haiku-20241022.",
     "defaultModelHint": "ollama/llama3.1:8b, gpt-4o-mini, anthropic/claude-3-5-haiku-20241022, gemini/gemini-2.0-flash",
     "memoryTokens": "Gedächtnis (Tokens)",
+    "memoryTokensSize": "Speichergröße",
+    "memoryTokensHint": "Legt fest, wie viel Kontextspeicher jeder Chat für persistente Erinnerungen nutzen darf.",
+    "memoryPerChatOnly": "Gedächtnis gilt immer nur für den jeweiligen Chat.",
     "appearance": "Erscheinungsbild",
     "darkMode": "Dark Mode",
     "lightMode": "Light Mode",
@@ -92,7 +136,21 @@
     "modelAccessHint": "Prüft, ob Ollama erreichbar ist und die konfigurierten Modelle verfügbar sind.",
     "testModels": "Modell-Zugriff testen",
     "testingModels": "Teste…",
-    "testInference": "Kurzen Inferenz-Test ausführen (kann bis zu 2 Minuten dauern)"
+    "testInference": "Kurzen Inferenz-Test ausführen (kann bis zu 2 Minuten dauern)",
+    "contextPlugins": "Context-Plugins",
+    "contextPluginsHint": "Diese Plugins werden nur bei Bedarf im Chat geladen, wenn deine Eingabe oder der KI-Prozess es erfordern.",
+    "contextPluginsEmpty": "Keine Context-Plugins verfügbar.",
+    "contextPluginsLoadError": "Context-Plugins konnten nicht geladen werden.",
+    "contextPluginEnabled": "Aktiv",
+    "contextPluginDisabled": "Deaktiviert",
+    "tabs": {
+      "general": "Allgemein",
+      "models": "Modelle",
+      "cloud": "Cloud",
+      "memory": "Gedächtnis",
+      "context": "Context",
+      "agents": "Agenten"
+    }
   },
   "about": {
     "title": "Über AgentForge",

@@ -6,25 +6,28 @@ import type {
   Chat,
   ChatRunStatus,
   CommitNewChatPayload,
+  ContextPluginRun,
   ExecutionStrategy,
   Message,
   NewChatDraft,
+  ShellCommandEntry,
 } from "../types";
 import { api } from "../services/api";
 import { useI18n } from "../hooks/useI18n";
 import { AgentHistory, type ActiveAgentInfo } from "./AgentHistory";
 import { AgentRunningClock } from "./AgentRunningClock";
 import { ApprovalPanel } from "./ApprovalPanel";
+import { ContextPluginLog } from "./ContextPluginLog";
+import { CommandHistoryModal } from "./CommandHistoryModal";
 import { ExpandableText } from "./ExpandableText";
-import { MemoryTokenSelect } from "./MemoryTokenSelect";
-import { DEFAULT_MEMORY_TOKENS, normalizeMemoryTokens, type MemoryTokenOption } from "../constants/memory";
-import {
-  DEFAULT_MULTI_ROLES,
-  normalizeSingleRoleIds,
-  SINGLE_AUTO_ROLE,
-  sortSdlcRoles,
-} from "../constants/roles";
+import { DEFAULT_MULTI_ROLES, normalizeSingleRoleIds, SINGLE_AUTO_ROLE, sortSdlcRoles } from "../constants/roles";
+import { normalizeMemoryTokens } from "../constants/memory";
 import { formatMessageTimestamp } from "../utils/formatMessageTimestamp";
+import {
+  collectShellCommands,
+  countExecutedShellCommands,
+  isShellCommandMessage,
+} from "../utils/shellCommands";
 import {
   playNotificationPing,
   unlockNotificationAudio,
@@ -43,6 +46,8 @@ interface ChatPanelProps {
   chat: Chat | null;
   draft: NewChatDraft | null;
   roles: AgentRole[];
+  defaultMemoryTokens: number;
+  chatBlockedReason?: string | null;
   onCommitDraft: (payload: CommitNewChatPayload) => Promise<Chat>;
   onChatUpdated: (chat: Chat) => void;
   onChatRunStateChange: (chatId: string, status: ChatRunStatus | "idle") => void;
@@ -52,6 +57,8 @@ export function ChatPanel({
   chat,
   draft,
   roles,
+  defaultMemoryTokens,
+  chatBlockedReason = null,
   onCommitDraft,
   onChatUpdated,
   onChatRunStateChange,
@@ -64,12 +71,15 @@ export function ChatPanel({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [contextPluginRuns, setContextPluginRuns] = useState<ContextPluginRun[]>([]);
+  const [pendingShellCommands, setPendingShellCommands] = useState<ShellCommandEntry[]>([]);
+  const [commandHistoryOpen, setCommandHistoryOpen] = useState(false);
   const [messageErrors, setMessageErrors] = useState<Record<string, string>>({});
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
-  const [memoryTokens, setMemoryTokens] = useState<MemoryTokenOption>(DEFAULT_MEMORY_TOKENS);
-  const [memoryScope, setMemoryScope] = useState<"chat" | "global">("chat");
   const [executionStrategy, setExecutionStrategy] = useState<ExecutionStrategy>("auto");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLElement>(null);
+  const stickToBottomRef = useRef(true);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingPromptRef = useRef<{ messageId: string; content: string } | null>(null);
   const loadingRef = useRef(false);
@@ -83,6 +93,13 @@ export function ChatPanel({
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const panelMode = chat?.mode ?? draft?.mode ?? "single";
   const isQuickMode = panelMode === "quick";
+  const shellCommandEntries = collectShellCommands(messages, approvals, pendingShellCommands);
+  const executedShellCommandCount = countExecutedShellCommands(shellCommandEntries);
+  const chatMemorySettings = {
+    enabled: true,
+    memory_tokens: normalizeMemoryTokens(defaultMemoryTokens),
+    memory_scope: "chat" as const,
+  };
   const orderedRoles = sortSdlcRoles(roles);
   const activeRoleIds =
     panelMode === "quick"
@@ -121,6 +138,8 @@ export function ChatPanel({
   }, []);
 
   useEffect(() => {
+    stickToBottomRef.current = true;
+    setPendingShellCommands([]);
     if (!chat && !draft) {
       setMessages([]);
       setDiscussions([]);
@@ -144,8 +163,6 @@ export function ChatPanel({
       } else {
         setSelectedRoles([]);
       }
-      setMemoryTokens(normalizeMemoryTokens(chat.memory.memory_tokens));
-      setMemoryScope(chat.memory.memory_scope);
       setExecutionStrategy(chat.execution_strategy);
 
       void (async () => {
@@ -171,8 +188,6 @@ export function ChatPanel({
             ? draft!.role_ids
             : [...DEFAULT_MULTI_ROLES],
     );
-    setMemoryTokens(normalizeMemoryTokens(draft!.memory.memory_tokens));
-    setMemoryScope(draft!.memory.memory_scope);
     setExecutionStrategy(draft!.execution_strategy);
     setMessages([]);
     setDiscussions([]);
@@ -180,6 +195,7 @@ export function ChatPanel({
     setApprovals([]);
     setMessageErrors({});
     setSubmitError("");
+    setContextPluginRuns([]);
   }, [chat?.id, draft]);
 
   useEffect(() => {
@@ -195,8 +211,25 @@ export function ChatPanel({
   }, [chat?.id]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, liveDiscussions, streamingContent]);
+    const container = messagesRef.current;
+    if (!container) {
+      return undefined;
+    }
+
+    const handleScroll = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      stickToBottomRef.current = distanceFromBottom < 96;
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [chat?.id, draft?.mode]);
+
+  useEffect(() => {
+    if (stickToBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, liveDiscussions, streamingContent, contextPluginRuns]);
 
   const toggleRole = (roleId: string) => {
     setSelectedRoles((prev) =>
@@ -255,11 +288,7 @@ export function ChatPanel({
     const updated = await api.updateChat(targetChat.id, {
       execution_strategy: executionStrategy,
       role_ids: roleIds,
-      memory: {
-        enabled: true,
-        memory_tokens: memoryTokens,
-        memory_scope: memoryScope,
-      },
+      memory: chatMemorySettings,
     });
     onChatUpdated(updated);
     return updated;
@@ -280,11 +309,7 @@ export function ChatPanel({
             ? normalizeSingleRoleIds(selectedRoles)
             : selectedRoles,
       execution_strategy: executionStrategy,
-      memory: {
-        enabled: true,
-        memory_tokens: memoryTokens,
-        memory_scope: memoryScope,
-      },
+      memory: chatMemorySettings,
     });
   };
 
@@ -407,6 +432,7 @@ export function ChatPanel({
     }
 
     if (appendUser) {
+      stickToBottomRef.current = true;
       const messageId = appendUserMessage(activeChat, content);
       pendingPromptRef.current = { messageId, content };
     }
@@ -480,6 +506,26 @@ export function ChatPanel({
             role_id?: string;
             agent_id?: string;
             agent_name?: string;
+            plugin_id?: string;
+            plugin_name?: string;
+            ok?: boolean;
+            text?: string;
+            error?: string | null;
+            reason?: string;
+            approval_id?: string;
+            command?: string;
+            cwd?: string;
+            timestamp?: string;
+            entry?: ShellCommandEntry;
+            required_plugins?: string[];
+            results?: Array<{
+              plugin_id: string;
+              plugin_name?: string;
+              ok: boolean;
+              text: string;
+              error?: string | null;
+            }>;
+            selection?: Array<{ plugin_id: string; reason: string }>;
             routing?: { model?: string };
             success?: boolean;
             discussion?: AgentMessage;
@@ -491,6 +537,66 @@ export function ChatPanel({
               resolved_role_id?: string;
             };
           };
+
+          if (data.type === "context_plugins_started") {
+            setContextPluginRuns([]);
+          }
+
+          if (data.type === "context_plugin_start" && data.plugin_id && data.plugin_name) {
+            setContextPluginRuns((prev) => [
+              ...prev,
+              {
+                plugin_id: data.plugin_id!,
+                plugin_name: data.plugin_name!,
+                status: "running",
+                timestamp: new Date().toISOString(),
+                reason: data.reason,
+              },
+            ]);
+          }
+
+          if (data.type === "context_plugin_complete" && data.plugin_id && data.plugin_name) {
+            setContextPluginRuns((prev) =>
+              prev.map((run) =>
+                run.plugin_id === data.plugin_id
+                  ? {
+                      ...run,
+                      status: data.ok ? "ok" : "error",
+                      text: data.text,
+                      error: data.error,
+                    }
+                  : run,
+              ),
+            );
+          }
+
+          if (data.type === "shell_command_pending" && data.command && data.approval_id) {
+            setPendingShellCommands((prev) => [
+              ...prev.filter((entry) => entry.approval_id !== data.approval_id),
+              {
+                id: `pending-${data.approval_id}`,
+                command: String(data.command),
+                cwd: data.cwd ? String(data.cwd) : undefined,
+                status: "pending",
+                success: false,
+                exit_code: null,
+                agent_id: data.agent_id ? String(data.agent_id) : null,
+                agent_name: data.agent_name ? String(data.agent_name) : null,
+                approval_id: String(data.approval_id),
+                timestamp: String(data.timestamp ?? new Date().toISOString()),
+              },
+            ]);
+          }
+
+          if (data.type === "shell_command_recorded") {
+            if (data.entry && typeof data.entry === "object") {
+              const entry = data.entry as ShellCommandEntry;
+              setPendingShellCommands((prev) =>
+                prev.filter((pending) => pending.approval_id !== entry.approval_id),
+              );
+            }
+            void api.listMessages(activeChat.id).then(setMessages);
+          }
 
           if (data.type === "content_delta" && data.content) {
             setStreamingContent((prev) => `${prev ?? ""}${data.content}`);
@@ -556,6 +662,11 @@ export function ChatPanel({
           }
 
           if (data.type === "approval_result") {
+            if (data.approval_id) {
+              setPendingShellCommands((prev) =>
+                prev.filter((entry) => entry.approval_id !== data.approval_id),
+              );
+            }
             void Promise.all([
               api.listMessages(activeChat.id).then(setMessages),
               api.listApprovals(activeChat.id).then(setApprovals),
@@ -693,7 +804,7 @@ export function ChatPanel({
   };
 
   const sendMessage = async () => {
-    if ((!chat && !draft) || !input.trim()) return;
+    if ((!chat && !draft) || !input.trim() || chatBlockedReason) return;
 
     const content = input.trim();
 
@@ -729,17 +840,54 @@ export function ChatPanel({
   return (
     <main className="chat-panel">
       <header className="chat-header">
-        <div className="chat-header-title">
-          <h2>{chat?.title ?? t("chat.newChatTitle")}</h2>
-          <span className="badge">
-            {panelMode === "multi"
-              ? t("chat.multiAgent")
-              : isQuickMode
-                ? t("chat.quickChat")
-                : t("chat.singleAgent")}
-          </span>
-          {isQuickMode && (
-            <p className="quick-chat-hint">{t("chat.quickChatDescription")}</p>
+        <div className="chat-header-top">
+          <div className="chat-header-title">
+            <h2>{chat?.title ?? t("chat.newChatTitle")}</h2>
+            <span className="badge">
+              {panelMode === "multi"
+                ? t("chat.multiAgent")
+                : isQuickMode
+                  ? t("chat.quickChat")
+                  : t("chat.singleAgent")}
+            </span>
+            {isQuickMode && (
+              <p className="quick-chat-hint">{t("chat.quickChatDescription")}</p>
+            )}
+          </div>
+          {!isQuickMode && (
+            <div className="memory-controls">
+              <label>
+                {t("chat.executionStrategy")}
+                <select
+                  value={executionStrategy}
+                  onChange={(e) => setExecutionStrategy(e.target.value as ExecutionStrategy)}
+                >
+                  <option value="auto">{t("chat.executionStrategyAuto")}</option>
+                  <option value="serial">{t("chat.executionStrategySerial")}</option>
+                  <option value="parallel">{t("chat.executionStrategyParallel")}</option>
+                  <option value="hybrid">{t("chat.executionStrategyHybrid")}</option>
+                </select>
+              </label>
+              <div className="command-history-control">
+                <button
+                  type="button"
+                  className="command-history-btn"
+                  title={t("shellCommands.open")}
+                  aria-label={t("shellCommands.openWithCount", { count: executedShellCommandCount })}
+                  onClick={() => setCommandHistoryOpen(true)}
+                >
+                  <svg className="command-history-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <rect x="3" y="4" width="18" height="14" rx="2" ry="2" />
+                    <path d="M7 8h10" />
+                    <path d="M7 12h6" />
+                    <path d="M7 16h8" />
+                  </svg>
+                </button>
+                <span className="command-history-count" aria-hidden="true">
+                  {executedShellCommandCount}
+                </span>
+              </div>
+            </div>
           )}
         </div>
         {!isQuickMode && (
@@ -786,43 +934,13 @@ export function ChatPanel({
           ))}
         </div>
         )}
-        <div className="memory-controls">
-          {!isQuickMode && (
-          <label>
-            {t("chat.executionStrategy")}
-            <select
-              value={executionStrategy}
-              onChange={(e) => setExecutionStrategy(e.target.value as ExecutionStrategy)}
-            >
-              <option value="auto">{t("chat.executionStrategyAuto")}</option>
-              <option value="serial">{t("chat.executionStrategySerial")}</option>
-              <option value="parallel">{t("chat.executionStrategyParallel")}</option>
-              <option value="hybrid">{t("chat.executionStrategyHybrid")}</option>
-            </select>
-          </label>
-          )}
-          <label>
-            {t("chat.memory")}
-            <MemoryTokenSelect
-              value={memoryTokens}
-              onChange={setMemoryTokens}
-            />
-          </label>
-          <select
-            value={memoryScope}
-            onChange={(e) => setMemoryScope(e.target.value as "chat" | "global")}
-          >
-            <option value="chat">{t("chat.memoryPerChat")}</option>
-            <option value="global">{t("chat.memoryGlobal")}</option>
-          </select>
-        </div>
       </header>
 
       <ApprovalPanel approvals={approvals} onRespond={handleApproval} />
 
       <div className="chat-body">
-        <section className="messages">
-          {messages.map((msg) => {
+        <section className="messages" ref={messagesRef}>
+          {messages.filter((msg) => !isShellCommandMessage(msg)).map((msg) => {
             const routing = msg.metadata?.routing as { model?: string; task?: string } | undefined;
             const modelLabel = routing?.model
               ? String(routing.model).replace(/^ollama\//, "")
@@ -901,6 +1019,7 @@ export function ChatPanel({
             </div>
             );
           })}
+          <ContextPluginLog runs={contextPluginRuns} />
           {loading && streamingContent !== null && (
             <div className="message message-assistant message-streaming">
               <div className="message-header">
@@ -953,10 +1072,17 @@ export function ChatPanel({
       </div>
 
       <footer className="chat-input">
+        {chatBlockedReason && (
+          <p className="chat-blocked-notice">{chatBlockedReason}</p>
+        )}
         <textarea
           value={input}
+          disabled={Boolean(chatBlockedReason)}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
+            if (chatBlockedReason) {
+              return;
+            }
             if (e.key !== "Enter" || e.nativeEvent.isComposing) {
               return;
             }
@@ -967,7 +1093,9 @@ export function ChatPanel({
             void sendMessage();
           }}
           placeholder={
-            loading
+            chatBlockedReason
+              ? t("readiness.chatBlocked")
+              : loading
               ? isQuickMode
                 ? t("chat.inputPlaceholderQuick")
                 : panelMode === "multi"
@@ -984,7 +1112,7 @@ export function ChatPanel({
             type="button"
             className="btn-primary"
             onClick={() => void sendMessage()}
-            disabled={!input.trim()}
+            disabled={!input.trim() || Boolean(chatBlockedReason)}
           >
             {t("chat.send")}
           </button>
@@ -999,6 +1127,11 @@ export function ChatPanel({
           )}
         </div>
       </footer>
+      <CommandHistoryModal
+        open={commandHistoryOpen}
+        entries={shellCommandEntries}
+        onClose={() => setCommandHistoryOpen(false)}
+      />
     </main>
   );
 }

@@ -21,6 +21,192 @@ from agentforge.llm.cloud_providers import (
 from agentforge.storage.model_store import model_store
 
 
+def active_model_ref(default_model: str | None = None) -> str:
+    """
+    Return the model reference used for chat orchestration.
+
+    :param default_model: Optional default model override
+    :return: LiteLLM model reference
+    """
+    override = settings.override_model.strip()
+    if override:
+        return override
+    return (default_model or settings.default_model).strip()
+
+
+def test_litellm_import() -> dict[str, Any]:
+    """
+    Verify LiteLLM provider resolution can load without import errors.
+
+    :return: Test result dict
+    """
+    try:
+        from agentforge.llm.litellm_compat import ensure_litellm_proxy_package
+
+        ensure_litellm_proxy_package()
+        import litellm
+
+        config = litellm.LiteLLMProxyChatConfig
+        config._should_use_litellm_proxy_by_default()
+        return {
+            "id": "litellm_import",
+            "label": t("settings_test.labels.litellm_import"),
+            "ok": True,
+            "message": t("settings_test.litellm_import_ok"),
+        }
+    except Exception as exc:
+        message = t("settings_test.litellm_import_fail", error=str(exc))
+        if "litellm_proxy" in str(exc):
+            message = f"{message}\n{t('settings_test.litellm_import_hint')}"
+        return {
+            "id": "litellm_import",
+            "label": t("settings_test.labels.litellm_import"),
+            "ok": False,
+            "message": message,
+        }
+
+
+async def test_litellm_inference(
+    model_ref: str | None = None,
+    *,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    """
+    Run a minimal LiteLLM completion using the configured provider stack.
+
+    :param model_ref: Optional LiteLLM model reference override
+    :param timeout: Optional request timeout override in seconds
+    :return: Test result dict
+    """
+    model = active_model_ref(model_ref)
+    import_result = test_litellm_import()
+    if not import_result.get("ok"):
+        return {
+            "id": "litellm_inference",
+            "label": t("settings_test.labels.litellm_inference"),
+            "ok": False,
+            "message": import_result.get("message", t("settings_test.litellm_import_fail", error="unknown")),
+            "model": model,
+        }
+
+    try:
+        import litellm
+
+        from agentforge.llm.cloud_providers import apply_cloud_credentials
+
+        apply_cloud_credentials()
+        request_timeout = timeout if timeout is not None else min(60.0, float(settings.llm_request_timeout))
+        response = await litellm.acompletion(
+            model=model,
+            messages=[{"role": "user", "content": "Reply with OK"}],
+            max_tokens=5,
+            timeout=request_timeout,
+        )
+        content = (response.choices[0].message.content or "")[:40]
+        return {
+            "id": "litellm_inference",
+            "label": t("settings_test.labels.litellm_inference"),
+            "ok": True,
+            "message": t("settings_test.litellm_inference_ok", model=model, response=content),
+            "model": model,
+        }
+    except Exception as exc:
+        message = t("settings_test.litellm_inference_fail", model=model, error=str(exc))
+        if "litellm_proxy" in str(exc):
+            message = f"{message}\n{t('settings_test.litellm_import_hint')}"
+        return {
+            "id": "litellm_inference",
+            "label": t("settings_test.labels.litellm_inference"),
+            "ok": False,
+            "message": message,
+            "model": model,
+        }
+
+
+def _blocking_readiness_result(results: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """
+    Return the first failed readiness check that blocks chat usage.
+
+    :param results: Readiness test results
+    :return: First blocking failure or None
+    """
+    blocking_ids = {
+        "ollama",
+        "default_model",
+        "litellm_import",
+        "litellm_inference",
+        "cloud_inference",
+    }
+    for result in results:
+        if result.get("id") not in blocking_ids:
+            continue
+        if result.get("skipped"):
+            continue
+        if result.get("ok") is False:
+            return result
+    return None
+
+
+async def run_readiness_check(
+    *,
+    include_inference: bool = False,
+    default_model: str | None = None,
+    ollama_url: str | None = None,
+) -> dict[str, Any]:
+    """
+    Run lightweight checks required before chat orchestration can succeed.
+
+    :param include_inference: Whether to run a short LiteLLM completion test
+    :param default_model: Optional default model override
+    :param ollama_url: Optional Ollama URL override
+    :return: Aggregated readiness report
+    """
+    model_ref = active_model_ref(default_model)
+    provider = detect_provider_from_model(model_ref)
+    base = (ollama_url or settings.ollama_base_url).rstrip("/")
+
+    results: list[dict[str, Any]] = [test_litellm_import()]
+
+    if provider is None:
+        ollama_result = await test_ollama(base)
+        installed = ollama_result.get("models") or []
+        results.extend(
+            [
+                ollama_result,
+                test_default_model_available(model_ref, installed),
+            ]
+        )
+        if include_inference and ollama_result.get("ok") and installed:
+            tag = _parse_ollama_tag(model_ref)
+            inference_model = model_ref
+            if tag and tag not in installed:
+                inference_model = f"ollama/{installed[0]}"
+            results.append(await test_litellm_inference(inference_model))
+    else:
+        results.append(
+            test_default_model_available(model_ref, []),
+        )
+        if include_inference and get_api_key(provider):
+            results.append(await test_cloud_inference(model_ref))
+
+    blocking = _blocking_readiness_result(results)
+    chat_ready = blocking is None and all(
+        result.get("ok") is True
+        for result in results
+        if result.get("id") in {"ollama", "default_model", "litellm_import", "litellm_inference", "cloud_inference"}
+        and not result.get("skipped")
+    )
+
+    return {
+        "chat_ready": chat_ready,
+        "active_model": model_ref,
+        "results": results,
+        "summary": t("settings_test.readiness_ok") if chat_ready else t("settings_test.readiness_fail"),
+        "blocking_message": blocking.get("message") if blocking else None,
+        "blocking_id": blocking.get("id") if blocking else None,
+    }
+
+
 def _label(test_id: str) -> str:
     """Return localized test label."""
     return t(f"setup.labels.{test_id}", locale=current_locale())
@@ -490,6 +676,7 @@ async def run_model_access_tests(
         ollama_result = await test_ollama(base)
         installed = ollama_result.get("models") or []
         results = [
+            test_litellm_import(),
             ollama_result,
             test_default_model_available(model_ref, installed),
             test_registry_on_ollama(installed),
@@ -500,10 +687,11 @@ async def run_model_access_tests(
             if detect_provider_from_model(model_ref):
                 results.append(await test_cloud_inference(model_ref))
             elif ollama_result.get("ok") and installed:
+                inference_model = model_ref
                 tag = _parse_ollama_tag(model_ref)
                 if tag and tag not in installed:
-                    tag = installed[0]
-                results.append(await test_ollama_generate(tag, base))
+                    inference_model = f"ollama/{installed[0]}"
+                results.append(await test_litellm_inference(inference_model))
 
     required_ok = ollama_result.get("ok") is True
     optional_issues = [r for r in results if r.get("ok") is False or r.get("warning")]

@@ -31,7 +31,7 @@ class MemoryStore:
         if not memory_settings.enabled:
             return ""
 
-        scopes = ["chat"] if memory_settings.memory_scope == "chat" else ["chat", "global"]
+        scopes = ["chat"]
         entries: list[tuple[str, str, str]] = []
 
         async with aiosqlite.connect(self.db_path) as db:

@@ -63,6 +63,31 @@ class Settings(BaseSettings):
     web_search_providers: list[str] = Field(
         default_factory=lambda: ["duckduckgo", "wikipedia", "duckduckgo_instant"]
     )
+    context_plugins_enabled: bool = True
+    context_plugins_enabled_list: list[str] = Field(
+        default_factory=lambda: [
+            "datetime",
+            "weather",
+            "holidays",
+            "exchange_rates",
+            "sun_times",
+            "country_facts",
+            "random_fact",
+        ]
+    )
+    context_timezone: str = "Europe/Berlin"
+    context_country_code: str = "DE"
+    context_city: str = "Berlin"
+    context_latitude: float | None = None
+    context_longitude: float | None = None
+    context_ip_geolocation_enabled: bool = True
+    context_ip_geolocation_cache_seconds: float = 300.0
+    context_exchange_base: str = "EUR"
+    context_exchange_symbols: list[str] = Field(
+        default_factory=lambda: ["USD", "GBP", "CHF", "PLN", "CZK"]
+    )
+    context_plugin_timeout: float = 10.0
+    context_startup_cache_seconds: float = 300.0
 
     @property
     def db_path(self) -> Path:

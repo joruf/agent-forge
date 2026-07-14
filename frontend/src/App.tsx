@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentRole, AppSettings, Chat, ChatRunStatus, CommitNewChatPayload, LLMRoutingInfo, NewChatDraft, OrchestrationMode, SettingsSavePayload, SetupStatus } from "./types";
+import type { AgentRole, AppSettings, Chat, ChatRunStatus, CommitNewChatPayload, LLMRoutingInfo, NewChatDraft, OrchestrationMode, ReadinessReport, SettingsSavePayload, SetupStatus } from "./types";
 import { api } from "./services/api";
+import { ModelReadinessBanner } from "./components/ModelReadinessBanner";
 import { AboutModal } from "./components/AboutModal";
 import { LanguagePicker } from "./components/LanguagePicker";
 import { ModelsManagerModal } from "./components/ModelsManagerModal";
@@ -32,8 +33,11 @@ export default function App() {
   const [languagePickerOpen, setLanguagePickerOpen] = useState(() => !hasStoredLocale());
   const [newChatDraft, setNewChatDraft] = useState<NewChatDraft | null>(null);
   const newChatDraftRef = useRef<NewChatDraft | null>(null);
-  const [defaultMode, setDefaultMode] = useState<OrchestrationMode>("single");
+  const [defaultMode, setDefaultMode] = useState<OrchestrationMode>("multi");
   const [backendOnline, setBackendOnline] = useState(false);
+  const [readiness, setReadiness] = useState<ReadinessReport | null>(null);
+  const [readinessBusy, setReadinessBusy] = useState(false);
+  const [readinessExpanded, setReadinessExpanded] = useState(false);
   const [chatRunStatus, setChatRunStatus] = useState<Record<string, ChatRunStatus>>({});
   const setupDismissedRef = useRef(false);
   const languagePickerOpenRef = useRef(languagePickerOpen);
@@ -98,6 +102,24 @@ export default function App() {
     }
   }, [setLocale]);
 
+  const checkReadiness = useCallback(async () => {
+    if (!backendOnline) {
+      return;
+    }
+    setReadinessBusy(true);
+    try {
+      const report = await api.getReadiness(false);
+      setReadiness(report);
+      if (report.chat_ready) {
+        setReadinessExpanded(false);
+      }
+    } catch {
+      setReadiness(null);
+    } finally {
+      setReadinessBusy(false);
+    }
+  }, [backendOnline]);
+
   const refresh = useCallback(async () => {
     try {
       await api.health();
@@ -105,8 +127,15 @@ export default function App() {
       await loadBackendData();
     } catch {
       setBackendOnline(false);
+      setReadiness(null);
     }
   }, [loadBackendData]);
+
+  useEffect(() => {
+    if (backendOnline) {
+      void checkReadiness();
+    }
+  }, [backendOnline, settings?.ollama_base_url, settings?.default_model, checkReadiness]);
 
   useEffect(() => {
     void refresh();
@@ -213,6 +242,7 @@ export default function App() {
     }
     setRoles(await api.listRoles());
     setRouting(await api.getLLMRouting());
+    await checkReadiness();
   };
 
   const handleLanguageChange = async (nextLocale: Locale) => {
@@ -311,18 +341,34 @@ export default function App() {
         aria-label={t("app.sidebarResize")}
         title={t("app.sidebarResize")}
       />
-      <ChatPanel
-        chat={activeChat}
-        draft={newChatDraft}
-        roles={roles}
-        onCommitDraft={commitNewChatDraft}
-        onChatUpdated={(updated) => {
-          setChats((prev) =>
-            prev.map((c) => (c.id === updated.id ? updated : c)),
-          );
-        }}
-        onChatRunStateChange={handleChatRunStateChange}
-      />
+      <div className="chat-shell">
+        <ModelReadinessBanner
+          report={readiness}
+          busy={readinessBusy}
+          expanded={readinessExpanded}
+          onToggleDetails={() => setReadinessExpanded((current) => !current)}
+          onRecheck={() => void checkReadiness()}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+        <ChatPanel
+          chat={activeChat}
+          draft={newChatDraft}
+          roles={roles}
+          defaultMemoryTokens={settings?.default_memory_tokens ?? 32000}
+          chatBlockedReason={
+            readiness && !readiness.chat_ready
+              ? readiness.blocking_message || readiness.summary
+              : null
+          }
+          onCommitDraft={commitNewChatDraft}
+          onChatUpdated={(updated) => {
+            setChats((prev) =>
+              prev.map((c) => (c.id === updated.id ? updated : c)),
+            );
+          }}
+          onChatRunStateChange={handleChatRunStateChange}
+        />
+      </div>
       <SettingsModal
         settings={settings}
         roles={roles}

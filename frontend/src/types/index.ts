@@ -185,6 +185,71 @@ export interface SetupTestReport {
   optional_issues: number;
 }
 
+export interface ReadinessReport {
+  chat_ready: boolean;
+  active_model: string;
+  results: SetupTestResult[];
+  summary: string;
+  blocking_message?: string | null;
+  blocking_id?: string | null;
+}
+
+export interface ContextPluginInfo {
+  id: string;
+  name: string;
+  description: string;
+  timing: string;
+  api_name: string;
+  api_url: string;
+  api_key_required: boolean;
+  license_note: string;
+  trigger_keywords: string[];
+  docs_url?: string;
+}
+
+export interface ContextSnapshot {
+  mode?: string;
+  text: string;
+  required_plugins?: string[];
+  results: Array<{
+    plugin_id: string;
+    plugin_name?: string;
+    ok: boolean;
+    text: string;
+    error?: string | null;
+    data?: Record<string, unknown>;
+  }>;
+  selection?: Array<{ plugin_id: string; reason: string }>;
+  cached?: boolean;
+  enabled?: boolean;
+}
+
+export interface ContextPluginRun {
+  plugin_id: string;
+  plugin_name: string;
+  status: "running" | "ok" | "error";
+  text?: string;
+  error?: string | null;
+  timestamp: string;
+  reason?: string;
+}
+
+export type ShellCommandStatus = "success" | "failed" | "blocked" | "pending" | "denied";
+
+export interface ShellCommandEntry {
+  id: string;
+  command: string;
+  cwd?: string;
+  status: ShellCommandStatus;
+  success: boolean;
+  exit_code?: number | null;
+  agent_id?: string | null;
+  agent_name?: string | null;
+  approval_id?: string;
+  output?: string;
+  timestamp: string;
+}
+
 export interface SetupStatus {
   completed: boolean;
   skipped: boolean;

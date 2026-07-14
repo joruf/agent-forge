@@ -25,6 +25,7 @@ from agentforge.agents.workspace_executor import (
 )
 from agentforge.agents.workspace_scanner import build_workspace_path_context
 from agentforge.config import settings
+from agentforge.context import context_registry
 from agentforge.llm.model_router import TaskType, model_router
 from agentforge.llm.provider import LLMProvider
 from agentforge.memory.store import memory_store
@@ -33,6 +34,7 @@ from agentforge.models.schemas import (
     AgentRole,
     ApprovalResponse,
     ApprovalResumeState,
+    ChatMemorySettings,
     ChatUpdate,
     ExecutionStrategy,
     LLMConfig,
@@ -41,6 +43,7 @@ from agentforge.models.schemas import (
     OrchestrationMode,
     OrchestrationResponse,
 )
+from agentforge.services.setup_service import run_readiness_check
 from agentforge.storage.conversation_store import conversation_store
 from agentforge.tools.registry import (
     EditFileTool,
@@ -54,6 +57,21 @@ from agentforge.tools.registry import (
     WebSearchTool,
     WriteFileTool,
 )
+
+
+def _effective_chat_memory(memory: ChatMemorySettings) -> ChatMemorySettings:
+    """
+    Apply global defaults for per-chat memory settings.
+
+    :param memory: Stored chat memory settings
+    :return: Effective memory settings for orchestration
+    """
+    return memory.model_copy(
+        update={
+            "memory_tokens": settings.default_memory_tokens,
+            "memory_scope": "chat",
+        }
+    )
 
 
 class AgentOrchestrator:
@@ -94,6 +112,7 @@ class AgentOrchestrator:
         )
         self.llm = LLMProvider(self.base_llm_config)
         self.max_tool_rounds = 8
+        self._ambient_context = ""
         self.max_multi_rounds = settings.multi_agent_max_rounds
 
     @staticmethod
@@ -885,6 +904,7 @@ class AgentOrchestrator:
         on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         intervention_queue: asyncio.Queue[str] | None = None,
         record_user_message: bool = True,
+        client_ip: str = "",
     ) -> OrchestrationResponse:
         """
         Execute orchestration for a user message.
@@ -896,21 +916,53 @@ class AgentOrchestrator:
         :param on_event: Optional WebSocket event callback
         :param intervention_queue: Optional queue for live user input during orchestration
         :param record_user_message: Store the user message before orchestration
+        :param client_ip: Optional client IP for location-aware context plugins
         :return: Orchestration result
         """
         chat = await conversation_store.get_chat(chat_id)
         requested_strategy = chat.execution_strategy
         effective_strategy = self._resolve_execution_strategy(mode, requested_strategy)
-        memory_context = await memory_store.get_context(chat_id, chat.memory)
-        tools = self._build_tools(chat_id, chat.memory.memory_scope)
+        memory_settings = _effective_chat_memory(chat.memory)
+        memory_context = await memory_store.get_context(chat_id, memory_settings)
+        tools = self._build_tools(chat_id, memory_settings.memory_scope)
 
         if record_user_message:
             await conversation_store.add_message(
                 chat_id, MessageRole.USER, user_content
             )
 
+        readiness = await run_readiness_check(include_inference=False)
+        if not readiness.get("chat_ready"):
+            error_message = readiness.get("blocking_message") or readiness.get("summary") or (
+                "Models are not ready for chat."
+            )
+            assistant = await conversation_store.add_message(
+                chat_id,
+                MessageRole.ASSISTANT,
+                error_message,
+            )
+            return OrchestrationResponse(
+                chat_id=chat_id,
+                messages=[assistant],
+                agent_discussions=[],
+                pending_approvals=approval_manager.list_pending(chat_id),
+                effective_execution_strategy=effective_strategy,
+            )
+
         workspace_intent = detect_workspace_intent(user_content)
         path_context = build_workspace_path_context(workspace_intent)
+        process_context = path_context
+        if workspace_intent.requires_tools:
+            process_context = "\n".join(
+                part for part in (path_context, workspace_intent.build_prompt_addon()) if part
+            )
+        self._ambient_context = await context_registry.build_for_message(
+            user_content,
+            chat_id,
+            on_event=on_event,
+            process_context=process_context,
+            client_ip=client_ip,
+        )
 
         if mode == OrchestrationMode.MULTI:
             result = await self._run_multi(
@@ -919,7 +971,7 @@ class AgentOrchestrator:
                 role_ids,
                 memory_context,
                 tools,
-                chat.memory.memory_scope,
+                memory_settings.memory_scope,
                 effective_strategy,
                 on_event,
                 intervention_queue,
@@ -931,7 +983,7 @@ class AgentOrchestrator:
                 chat_id,
                 user_content,
                 memory_context,
-                chat.memory.enabled,
+                memory_settings.enabled,
                 effective_strategy,
                 on_event,
                 intervention_queue,
@@ -944,7 +996,7 @@ class AgentOrchestrator:
                 role_ids,
                 memory_context,
                 tools,
-                chat.memory.memory_scope,
+                memory_settings.memory_scope,
                 effective_strategy,
                 on_event,
                 intervention_queue,
@@ -1103,6 +1155,8 @@ class AgentOrchestrator:
             })
 
         system = self.QUICK_SYSTEM_PROMPT
+        if self._ambient_context:
+            system += f"\n\n{self._ambient_context}"
         if memory_enabled and memory_context:
             system += f"\n\n{memory_context}"
         if path_context:
@@ -1396,8 +1450,9 @@ class AgentOrchestrator:
                 workspace += f"\n\n{path_context}"
         elif path_context:
             workspace = f"\n\n{path_context}"
+        ambient = f"\n\n{self._ambient_context}" if self._ambient_context else ""
         memory = f"\n\n{memory_context}" if memory_context else ""
-        return base + workspace + web_search + memory
+        return base + workspace + web_search + ambient + memory
 
     async def _stream_llm_complete(
         self,
@@ -1879,6 +1934,41 @@ class AgentOrchestrator:
 
                 tool_result = await tools.execute(tc["name"], tc["arguments"])
 
+                if tc["name"] == "run_command":
+                    command, cwd = self._parse_run_command_arguments(tc["arguments"])
+                    if tool_result.requires_approval and tool_result.approval_id:
+                        if on_event:
+                            await on_event({
+                                "type": "shell_command_pending",
+                                "approval_id": tool_result.approval_id,
+                                "command": command,
+                                "cwd": cwd,
+                                "agent_id": agent_id,
+                                "agent_name": agent_name,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+                    elif command:
+                        status, exit_code = self._shell_status_from_output(
+                            tool_result.output,
+                            success=tool_result.success,
+                        )
+                        recorded = await self._record_shell_command(
+                            chat_id,
+                            command=command,
+                            cwd=cwd,
+                            status=status,
+                            success=tool_result.success,
+                            exit_code=exit_code,
+                            output=tool_result.output,
+                            agent_id=agent_id,
+                            agent_name=agent_name,
+                        )
+                        if on_event:
+                            await on_event({
+                                "type": "shell_command_recorded",
+                                "entry": self._serialize_shell_command_entry(recorded),
+                            })
+
                 if tool_result.success:
                     summary = self._summarize_tool_call(
                         tc["name"],
@@ -2023,6 +2113,119 @@ class AgentOrchestrator:
             intervention_queue=None,
         )
 
+    @staticmethod
+    def _parse_run_command_arguments(arguments: str) -> tuple[str, str | None]:
+        """
+        Parse run_command tool arguments.
+
+        :param arguments: JSON-encoded tool arguments
+        :return: Command string and optional relative cwd
+        """
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            return arguments.strip(), None
+        command = str(parsed.get("command", "")).strip()
+        cwd = parsed.get("cwd")
+        return command, str(cwd).strip() if cwd else None
+
+    @staticmethod
+    def _shell_status_from_output(output: str, *, success: bool) -> tuple[str, int | None]:
+        """
+        Derive shell command status and exit code from tool output.
+
+        :param output: Tool execution output
+        :param success: Tool success flag
+        :return: Status label and optional exit code
+        """
+        lowered = output.lower()
+        if "is blocked" in lowered or lowered.startswith("invalid command"):
+            return "blocked", None
+        if lowered.startswith("awaiting approval") or lowered.startswith("approval required"):
+            return "pending", None
+        ok_match = re.match(r"^\[OK\]", output)
+        if ok_match:
+            return "success", 0
+        exit_match = re.match(r"^\[Exit (\d+)\]", output)
+        if exit_match:
+            exit_code = int(exit_match.group(1))
+            return ("success" if exit_code == 0 else "failed"), exit_code
+        return ("success" if success else "failed"), None
+
+    async def _record_shell_command(
+        self,
+        chat_id: str,
+        *,
+        command: str,
+        cwd: str | None,
+        status: str,
+        success: bool,
+        exit_code: int | None,
+        output: str,
+        agent_id: str | None,
+        agent_name: str | None,
+        approval_id: str | None = None,
+    ) -> MessageResponse:
+        """
+        Persist a shell command execution record for the command history UI.
+
+        :param chat_id: Chat session ID
+        :param command: Executed shell command
+        :param cwd: Optional relative working directory
+        :param status: Status label (success, failed, blocked, denied, pending)
+        :param success: Whether execution succeeded
+        :param exit_code: Optional process exit code
+        :param output: Command output text
+        :param agent_id: Agent role identifier
+        :param agent_name: Agent display name
+        :param approval_id: Optional approval identifier
+        :return: Stored message response
+        """
+        metadata: dict[str, Any] = {
+            "kind": "shell_command",
+            "command": command,
+            "status": status,
+            "success": success,
+        }
+        if cwd:
+            metadata["cwd"] = cwd
+        if exit_code is not None:
+            metadata["exit_code"] = exit_code
+        if approval_id:
+            metadata["approval_id"] = approval_id
+
+        return await conversation_store.add_message(
+            chat_id,
+            MessageRole.TOOL,
+            output[: settings.max_output_chars] if output else "",
+            agent_id=agent_id,
+            agent_name=agent_name,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _serialize_shell_command_entry(message: MessageResponse) -> dict[str, Any]:
+        """
+        Serialize a shell command message for WebSocket clients.
+
+        :param message: Stored message response
+        :return: JSON-serializable command entry
+        """
+        metadata = message.metadata or {}
+        return {
+            "id": message.id,
+            "command": metadata.get("command", ""),
+            "cwd": metadata.get("cwd"),
+            "status": metadata.get("status", "success" if metadata.get("success") else "failed"),
+            "success": bool(metadata.get("success")),
+            "exit_code": metadata.get("exit_code"),
+            "agent_id": message.agent_id,
+            "agent_name": message.agent_name,
+            "approval_id": metadata.get("approval_id"),
+            "output": message.content,
+            "timestamp": message.created_at.isoformat(),
+        }
+
     async def execute_approved_command(
         self,
         chat_id: str,
@@ -2033,6 +2236,23 @@ class AgentOrchestrator:
         pending = approval_manager.list_pending(chat_id)
         target = next((p for p in pending if p.id == approval_id), None)
         if not target or not response.approved:
+            if target and target.action_type == "command":
+                command = str(target.payload.get("command", "")).strip()
+                denied = await self._record_shell_command(
+                    chat_id,
+                    command=command,
+                    cwd=target.payload.get("cwd"),
+                    status="denied",
+                    success=False,
+                    exit_code=None,
+                    output="Command denied by user.",
+                    agent_id=None,
+                    agent_name=None,
+                    approval_id=approval_id,
+                )
+                await approval_manager.respond(approval_id, response)
+                approval_manager.pop_resume_state(approval_id)
+                return denied
             await approval_manager.respond(approval_id, response)
             approval_manager.pop_resume_state(approval_id)
             return None
@@ -2055,12 +2275,20 @@ class AgentOrchestrator:
         stdout, stderr = await proc.communicate()
         output = stdout.decode(errors="replace") + stderr.decode(errors="replace")
         trimmed_output = output[:settings.max_output_chars]
+        exit_code = proc.returncode
+        command_status = "success" if exit_code == 0 else "failed"
 
-        tool_msg = await conversation_store.add_message(
+        tool_msg = await self._record_shell_command(
             chat_id,
-            MessageRole.TOOL,
-            f"Command executed: {command}\n{trimmed_output}",
-            metadata={"approval_id": approval_id},
+            command=command,
+            cwd=target.payload.get("cwd"),
+            status=command_status,
+            success=exit_code == 0,
+            exit_code=exit_code,
+            output=f"[{'OK' if exit_code == 0 else f'Exit {exit_code}'}]\n{trimmed_output}".strip(),
+            agent_id=None,
+            agent_name=None,
+            approval_id=approval_id,
         )
         try:
             resume_state = approval_manager.pop_resume_state(approval_id)

@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class OrchestrationMode(str, Enum):
@@ -64,8 +64,19 @@ class ChatMemorySettings(BaseModel):
     """Per-chat memory configuration."""
 
     memory_tokens: int = 32000
-    memory_scope: str = "chat"  # "chat" or "global"
+    memory_scope: str = "chat"
     enabled: bool = True
+
+    @field_validator("memory_scope")
+    @classmethod
+    def enforce_chat_scope(cls, value: str) -> str:
+        """
+        Force chat-scoped memory regardless of incoming payload.
+
+        :param value: Requested memory scope
+        :return: Normalized chat scope
+        """
+        return "chat"
 
 
 class ChatCreate(BaseModel):

@@ -34,12 +34,14 @@ async def test_chat_scope_memory(memory_db: MemoryStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_global_memory_included(memory_db: MemoryStore) -> None:
-    """Global scope entries are included when configured."""
+async def test_global_memory_is_ignored(memory_db: MemoryStore) -> None:
+    """Global scope entries are ignored; memory is always per chat."""
+    await memory_db.set_entry("chat-2", "chat", "pref", "local")
     await memory_db.set_entry(None, "global", "user_name", "Joachim")
     settings = ChatMemorySettings(enabled=True, memory_tokens=8000, memory_scope="global")
     context = await memory_db.get_context("chat-2", settings)
-    assert "user_name: Joachim" in context
+    assert "pref: local" in context
+    assert "user_name: Joachim" not in context
 
 
 @pytest.mark.asyncio

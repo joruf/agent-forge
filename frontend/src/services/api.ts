@@ -14,6 +14,9 @@ import type {
   SettingsSavePayload,
   SetupStatus,
   SetupTestReport,
+  ReadinessReport,
+  ContextPluginInfo,
+  ContextSnapshot,
   UserModel,
 } from "../types";
 
@@ -33,6 +36,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<{ status: string }>("/health"),
+
+  getReadiness: (includeInference = false) =>
+    request<ReadinessReport>(`/readiness?include_inference=${includeInference ? "true" : "false"}`),
+
+  getContextCatalog: () =>
+    request<{ plugins: ContextPluginInfo[]; enabled: string[] }>("/context/catalog"),
+
+  getContextStartup: (refresh = false) =>
+    request<ContextSnapshot>(`/context/startup?refresh=${refresh ? "true" : "false"}`),
 
   getSettings: () => request<AppSettings>("/settings"),
 

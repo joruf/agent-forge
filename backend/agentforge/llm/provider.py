@@ -7,6 +7,9 @@ import litellm
 
 from agentforge.config import settings
 from agentforge.llm.cloud_providers import apply_cloud_credentials
+from agentforge.llm.litellm_compat import ensure_litellm_proxy_package
+
+ensure_litellm_proxy_package()
 from agentforge.llm.model_router import TaskType, model_router
 from agentforge.models.schemas import LLMConfig
 

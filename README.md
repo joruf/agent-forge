@@ -1,12 +1,11 @@
 # AgentForge
 
-**Multi-agent AI desktop platform for Linux** — coding assistance, collaborative task processing, and human-in-the-loop workflows with local Ollama and optional cloud LLMs.
+**Multi-agent AI desktop platform** — coding assistance, collaborative task processing, and human-in-the-loop workflows with local Ollama and optional cloud LLMs. Built with **Python (FastAPI)** and **React**, so the core app is cross-platform.
 
 | | |
 |---|---|
-| **Version** | 0.1.0 |
 | **License** | MIT |
-| **Platform** | Linux (desktop) |
+| **Platform** | Cross-platform (Linux, Windows, macOS) — Linux best tested |
 | **Stack** | Python 3.12 · FastAPI · React · TypeScript · LiteLLM · SQLite |
 
 ---
@@ -21,13 +20,13 @@ AgentForge is a local-first AI assistant that can read and write files in your w
 - **Multi-agent mode** — six built-in roles collaborate; live agent history panel
 - **Human-in-the-loop** — shell command whitelist + approval dialog for everything else
 - **Expandable agent history** — truncated messages expand on click
-- **Configurable memory** — per-chat token budget (100 – 128 000 tokens), chat or global scope
+- **Configurable memory** — per-chat token budget (100 – 128 000 tokens), configured in Properties
 - **LLM auto-routing** — task-type based model selection (coding, SQL, research, …)
 - **Multi-provider support** — Ollama (local/remote) + OpenAI, Claude, Gemini, Groq, Mistral via LiteLLM
 - **Setup wizard** — guided first-run checks for Ollama, models, workspace, API keys
 - **Persistent chats** — SQLite storage with auto-generated titles
 - **Bilingual UI** — English and German
-- **Desktop integration** — Chromium app window, optional native Tauri build, Linux desktop shortcut
+- **Desktop integration** — browser or Chromium app window; optional Tauri build; automated menu shortcut on Linux
 
 ### Built-in agent roles
 
@@ -44,11 +43,243 @@ Custom roles can be added as YAML files in `assets/roles/`.
 
 ---
 
+## User interface layout
+
+This section describes how AgentForge is **visually structured**, which **UI areas** exist, and what they are called in the interface and in the frontend code (CSS class names in `frontend/src/styles/app.css`).
+
+### Main screen (default view)
+
+When the backend is running, the app uses a **two-column layout**: a fixed **sidebar** on the left and the **chat area** on the right. A thin **sidebar resizer** sits between them and can be dragged to change the sidebar width.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  .app                                                                       │
+│ ┌──────────────────┬─┬──────────────────────────────────────────────────┐ │
+│ │ .sidebar-shell   │ │ .chat-shell                                      │ │
+│ │ ┌──────────────┐ │R│ ┌──────────────────────────────────────────────┐ │ │
+│ │ │ .sidebar     │ │E│ │ .model-readiness-banner (if models fail)     │ │ │
+│ │ │              │ │S│ ├──────────────────────────────────────────────┤ │ │
+│ │ │              │ │I│ │ .chat-panel                                  │ │ │
+│ │ │              │ │Z│ │  or .chat-panel.empty (no chat selected)     │ │ │
+│ │ │              │ │E│ │                                              │ │ │
+│ │ │              │ │R│ │                                              │ │ │
+│ │ └──────────────┘ │ │ └──────────────────────────────────────────────┘ │ │
+│ └──────────────────┴─┴──────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Area | UI name (EN) | UI name (DE) | Root CSS class |
+|------|----------------|--------------|----------------|
+| Application root | — | — | `.app` |
+| Sidebar container | Sidebar | Sidebar | `.sidebar-shell` → `.sidebar` |
+| Width handle | Sidebar resize | Menübreite anpassen | `.sidebar-resizer` |
+| Main content | Chat area | Chat-Bereich | `.chat-shell` |
+| Active chat view | Chat panel | Chat-Panel | `.chat-panel` |
+| No chat selected | Empty state | Leerer Zustand | `.chat-panel.empty` |
+
+**Default on start:** **Multi-Agent** is pre-selected in the sidebar (`.mode-btn.active` on **+ Multi-Agent**).
+
+---
+
+### Sidebar (`.sidebar`)
+
+The sidebar is the primary navigation. It contains the app title, a gear menu, chat-mode buttons, and the list of saved chats.
+
+```
+┌─────────────────────────┐
+│ .sidebar-header         │
+│  AgentForge    [⚙ menu] │  ← .sidebar-menu-trigger
+├─────────────────────────┤
+│ .sidebar-actions        │
+│ [+ Quick Chat]          │  ← .mode-btn
+│ [+ Single Agent]        │
+│ [+ Multi-Agent] ★       │  ← default active
+├─────────────────────────┤
+│ .chat-list              │
+│ ┌─ .chat-item ────────┐ │
+│ │ .chat-item-btn      │ │
+│ │  .chat-title        │ │
+│ │  .chat-mode         │ │
+│ │  .chat-item-status  │ │  ← running clock / completed check
+│ │              [×]    │ │  ← .chat-delete
+│ └─────────────────────┘ │
+│  … more chats …         │
+├─────────────────────────┤
+│ .sidebar-footer         │  ← optional: Resume setup
+└─────────────────────────┘
+```
+
+| Element | Description | CSS class |
+|---------|-------------|-----------|
+| **App title** | “AgentForge” heading | `.sidebar-header` `h1` |
+| **Menu button** | Gear icon (⚙), opens dropdown | `.sidebar-menu-trigger` |
+| **Menu popup** | Dropdown with links to settings, manual, models, about | `.sidebar-menu-popup` |
+| **Properties** | Opens settings dialog (DE: *Eigenschaften*) | menu item → **Settings modal** |
+| **Manage models** | Opens model manager | menu item → **Models modal** |
+| **User manual** | Opens `docs/USER_MANUAL.html` | menu item |
+| **About** | Opens about dialog | menu item → **About modal** |
+| **New chat buttons** | Quick Chat / Single Agent / Multi-Agent | `.sidebar-actions` `.mode-btn` |
+| **Chat list** | All persisted chats, newest on top | `.chat-list` |
+| **Chat item** | One row per chat; click to open | `.chat-item` / `.chat-item-btn` |
+| **Chat title** | Double-click to rename | `.chat-title` / `.chat-title-input` |
+| **Chat mode label** | Shows Quick / Single / Multi | `.chat-mode` |
+| **Run status icon** | Clock while agents work, check when done | `.chat-item-status` |
+| **Delete chat** | × button on each row | `.chat-delete` |
+| **Resume setup** | Shown if first-run wizard was dismissed | `.sidebar-footer` `.setup-resume-link` |
+
+---
+
+### Chat panel (`.chat-panel`)
+
+Shown in the chat area when a chat is selected or a **new chat draft** exists (after clicking a mode button). If neither applies, the **empty state** shows: *“Select a chat or create a new one.”*
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ .chat-header                                                             │
+│  .chat-header-title: [Chat title]  (.badge: mode)                       │
+│  .role-selector: role chips (Single / Multi only, not Quick Chat)        │
+│  .memory-controls: command history btn, execution strategy (Multi)       │
+├──────────────────────────────────────────────────────────────────────────┤
+│ .approval-panel (if shell/command needs approval)                        │
+├──────────────────────────────────────────────────────────────────────────┤
+│ .chat-body                                                               │
+│ ┌───────────────────────────────┬────────────────────────────────────┐ │
+│ │ .messages                     │ .agent-history (Multi-Agent only)  │ │
+│ │  message bubbles…             │  Agent-Verlauf / agent discussions │ │
+│ └───────────────────────────────┴────────────────────────────────────┘ │
+├──────────────────────────────────────────────────────────────────────────┤
+│ .chat-input                                                              │
+│  .chat-blocked-notice (if models not ready)                              │
+│  textarea + Send / Stop                                                  │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+| Element | Description | CSS class |
+|---------|-------------|-----------|
+| **Chat header** | Title + mode badge + controls | `.chat-header` |
+| **Mode badge** | Quick Chat / Single Agent / Multi-Agent | `.badge` |
+| **Role selector** | Pick agent role(s); Single = radio, Multi = checkboxes | `.role-selector` `.role-chip` |
+| **Auto role** | Automatic role selection (Single Agent) | `.role-chip-auto` |
+| **Execution strategy** | Auto / Serial / Parallel / Hybrid (Multi-Agent) | `.memory-controls` `select` |
+| **Command history** | Shell commands run in this chat | `.command-history-btn` → `CommandHistoryModal` |
+| **Approval panel** | Approve or deny risky shell commands | `.approval-panel` |
+| **Message list** | Scrollable chat transcript | `.messages` |
+| **Agent history** | Side panel with inter-agent messages (Multi-Agent only) | `.agent-history` |
+| **Chat input** | Message textarea, Send, Stop while running | `.chat-input` |
+
+---
+
+### Message bubbles (inside `.messages`)
+
+Each line in the transcript is a **message bubble** (`.message`). Styling differs by role:
+
+| Type | Label in header | CSS classes | Border colour |
+|------|-----------------|-------------|---------------|
+| **User message** | “You” / *Du* | `.message.message-user` | Accent (blue) |
+| **Assistant reply** | Agent name or “Assistant” | `.message.message-assistant` | Green |
+| **Agent discussion** | Agent name | `.message.message-agent` | Green |
+| **Context plugin result** | “Plugin {name}” (e.g. Plugin Weather) | `.message.message-agent` | Green |
+| **Streaming reply** | Agent name while tokens arrive | `.message-assistant.message-streaming` | Green |
+| **Loading placeholder** | Agent name + clock | `.message-assistant.message-loading` | Green |
+| **Error** | — | `.message.message-error` | Red |
+
+Common parts of every bubble:
+
+| Part | CSS class |
+|------|-----------|
+| Header row (name, model, time) | `.message-header` |
+| Model name (if routed) | `.message-model` |
+| Timestamp + copy (+ resend on last user msg) | `.message-meta` `.message-time` `.message-copy-btn` |
+| Body text (expandable) | `ExpandableText` → `.expandable-text` |
+| Plugin trigger reason | `.message-plugin-reason` |
+
+**Context plugins** appear as normal green message bubbles in the chat flow (not in a separate box). They load on demand when the user message or AI process requires them.
+
+---
+
+### Model readiness banner (`.model-readiness-banner`)
+
+Optional bar at the top of `.chat-shell`, shown when configured models are **not ready**. It blocks chat input until resolved.
+
+| Control | Action |
+|---------|--------|
+| **Recheck** | Run readiness test again |
+| **Settings** | Open Properties dialog |
+| **Show / hide details** | Expand test result list |
+
+---
+
+### Dialogs and overlays
+
+These appear on top of the main UI (`.modal-overlay` or dedicated overlay classes).
+
+| Dialog | How to open | CSS / component |
+|--------|-------------|-----------------|
+| **Language picker** | First launch (no saved language) | `.language-picker-overlay` → `LanguagePicker` |
+| **Setup wizard** | First run or *Resume setup* in sidebar | `SetupWizard` (multi-step modal) |
+| **Properties / Settings** | Sidebar menu → Properties | `.modal.settings-modal` → `SettingsModal` |
+| **Manage models & routing** | Sidebar menu or Settings → Models tab | `.modal.models-modal` → `ModelsManagerModal` |
+| **About AgentForge** | Sidebar menu → About | `.modal.about-modal` → `AboutModal` |
+
+#### Properties dialog — tabs (`.settings-tabs`)
+
+The settings form uses **horizontal tabs** that wrap to the next line when space is tight. The dialog keeps a **fixed size**; tab content scrolls inside.
+
+| Tab (EN) | Tab (DE) | Contents |
+|----------|----------|----------|
+| **General** | Allgemein | Language, appearance (dark/light), workspace directory |
+| **Models** | Modelle | Ollama URL, default model, auto-routing, model access test, link to manage models |
+| **Cloud** | Cloud | API keys (OpenAI, Anthropic, Gemini, Groq, Mistral) |
+| **Memory** | Gedächtnis | Default memory token budget |
+| **Context** | Context | Context plugins catalog (on-demand weather, date/time, etc.) |
+| **Agents** | Agenten | List of available agent roles |
+
+Footer on all modals: **Cancel** / **Save** (`.modal-actions`).
+
+#### Manage models dialog (sections)
+
+| Section | Purpose |
+|---------|---------|
+| **Add model** | Register Ollama tag or cloud model ID |
+| **Model list** | Enable/disable, edit, delete, assign task types (`.model-card`) |
+| **Routing table** | Default model per task type (coding, research, SQL, …) |
+
+---
+
+### Offline screen (`.offline-screen`)
+
+If the backend is not reachable, the full window is replaced by a minimal screen: title, hint to run `python3 run.py`, and **Reconnect**.
+
+---
+
+### Frontend component map
+
+For developers, UI areas map to React components under `frontend/src/components/`:
+
+| UI area | Component file |
+|---------|----------------|
+| Root layout | `App.tsx` |
+| Sidebar | `Sidebar.tsx` |
+| Chat panel | `ChatPanel.tsx` |
+| Messages / input | `ChatPanel.tsx` |
+| Context plugin bubbles | `ContextPluginLog.tsx` |
+| Agent history | `AgentHistory.tsx` |
+| Approvals | `ApprovalPanel.tsx` |
+| Model readiness | `ModelReadinessBanner.tsx` |
+| Settings (Properties) | `SettingsModal.tsx` |
+| Context plugins list (settings) | `ContextPluginsList.tsx` |
+| Models manager | `ModelsManagerModal.tsx` |
+| About | `AboutModal.tsx` |
+| Setup wizard | `SetupWizard.tsx` |
+| Language picker | `LanguagePicker.tsx` |
+
+---
+
 ## Requirements
 
 | Component | Minimum |
 |-----------|---------|
-| **OS** | Linux desktop (Ubuntu, Mint, Debian, …) |
+| **OS** | Linux, Windows, or macOS (desktop) |
 | **Python** | 3.12+ |
 | **Node.js** | 20+ (with npm) |
 | **Ollama** | HTTP-accessible instance (local or remote) |
@@ -57,9 +288,27 @@ Custom roles can be added as YAML files in `assets/roles/`.
 
 **Optional:**
 
-- Chromium or Firefox (desktop app window)
+- Chromium, Firefox, Edge, or Safari (UI in browser or app window)
 - Rust toolchain (native Tauri desktop build)
 - Cloud API keys (OpenAI, Anthropic, Gemini, Groq, Mistral)
+
+### Platform support
+
+AgentForge is **not Linux-only**. The backend and frontend use standard Python and Node.js tooling and should run on all major desktop operating systems.
+
+| OS | Status | Notes |
+|----|--------|-------|
+| **Linux** | Primary / best tested | Full installer (`install.py`), desktop shortcut, shell-tool defaults tuned for Unix |
+| **Windows** | Supported | Manual setup: Python venv, `npm install`, `python run.py`; use browser mode or your own browser; adjust `AGENTFORGE_WORKSPACE_ROOT` and shell whitelist if needed |
+| **macOS** | Supported | Same manual flow as Windows; Ollama is typically installed locally |
+
+What differs by platform is mostly **integration**, not the core product:
+
+- **Linux** — one-command install, `.desktop` launcher, documented package list
+- **Windows / macOS** — same runtime stack; you install Python/Node yourself; browser mode (`AGENTFORGE_MODE=browser`) is the simplest start
+- **All platforms** — SQLite data under the user profile, FastAPI on port 8765, Vite dev UI on port 5173
+
+If something fails on Windows or macOS, it is usually a small path, shell, or launcher detail — not a different architecture.
 
 ---
 
@@ -74,7 +323,9 @@ cd AgentForge
 
 > Replace `YOUR_USERNAME` with your GitHub account or organization name once the repository is published.
 
-### 2. Install system packages (recommended)
+### 2. Install system packages
+
+#### Linux (recommended automated path)
 
 On Debian/Ubuntu/Linux Mint:
 
@@ -89,18 +340,41 @@ For the native Tauri desktop build, also install Tauri Linux dependencies:
 python3 install.py --system
 ```
 
-### 3. Run the installer
+#### Windows and macOS (manual path)
+
+1. Install **Python 3.12+** and **Node.js 20+** from the official installers.
+2. Install **Ollama** for your OS if you want local models.
+3. Clone the repo and continue with step 3 below (venv + npm manually instead of `install.py`, or run `python install.py` — it skips Linux-only steps on other OSes).
+
+Quick start on any OS after dependencies are installed:
+
+```bash
+cd backend
+python -m venv .venv
+# Linux/macOS: source .venv/bin/activate
+# Windows:     .venv\Scripts\activate
+pip install -r requirements.txt
+cd ../frontend
+npm install
+cd ..
+cp .env.example backend/.env   # edit paths for your OS
+AGENTFORGE_MODE=browser python run.py
+```
+
+### 3. Run the Linux installer
 
 ```bash
 python3 install.py
 ```
 
-This will:
+This will (Linux):
 
 1. Create a Python virtual environment in `backend/.venv`
 2. Install Python dependencies from `backend/requirements.txt`
 3. Install frontend npm packages in `frontend/`
 4. Create a Linux desktop shortcut (application menu entry)
+
+On Windows/macOS, perform the equivalent steps from the manual path above instead.
 
 ### 4. Configure environment
 
@@ -170,10 +444,10 @@ python3 stop.py
 
 | Command | Behaviour |
 |---------|-----------|
-| `python3 run.py` | Default: Chromium/Firefox app window |
-| `AGENTFORGE_MODE=browser python3 run.py` | Open in default browser tab |
-| `AGENTFORGE_MODE=window python3 run.py` | Force standalone browser window |
-| `AGENTFORGE_MODE=tauri python3 run.py` | Native Tauri app (requires Rust + system deps) |
+| `python3 run.py` | Default on Linux: Chromium/Firefox app window when available |
+| `AGENTFORGE_MODE=browser python run.py` | Open in default browser tab (simplest on Windows/macOS) |
+| `AGENTFORGE_MODE=window python run.py` | Force standalone browser window |
+| `AGENTFORGE_MODE=tauri python run.py` | Native Tauri app (requires Rust + platform-specific deps) |
 
 **Ports:**
 
@@ -360,7 +634,7 @@ cd frontend && npm run tauri:build
 | *Ollama connection failed* | Verify `AGENTFORGE_OLLAMA_BASE_URL`; test with `curl http://host:11434/api/tags` |
 | *LLM timeout / Connection timed out* | Increase `AGENTFORGE_LLM_REQUEST_TIMEOUT` (e.g. `600`); use Single Agent instead of Multi-Agent; set `AGENTFORGE_MULTI_AGENT_MAX_ROUNDS_OLLAMA=2` |
 | *No models available* | Pull models in Ollama; run setup wizard or **Manage models → Sync** |
-| *Desktop window not opening* | Install Chromium: `sudo apt install chromium-browser` |
+| *Desktop window not opening* | Linux: install Chromium (`sudo apt install chromium-browser`). Windows/macOS: use `AGENTFORGE_MODE=browser python run.py` |
 | *Frontend not installed* | Run `python3 install.py` |
 
 ---

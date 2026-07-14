@@ -167,3 +167,36 @@ def test_parse_default_model_available(english_locale) -> None:
         ["llama3.1:8b"],
     )
     assert missing["ok"] is False
+
+
+def test_litellm_import_check(english_locale) -> None:
+    """LiteLLM import check succeeds in the test environment."""
+    result = setup_service.test_litellm_import()
+    assert result["id"] == "litellm_import"
+    assert result["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_readiness_check_ollama(monkeypatch, english_locale) -> None:
+    """Readiness report marks chat unavailable when Ollama is down."""
+
+    async def fake_ollama(url=None):
+        return {
+            "id": "ollama",
+            "ok": False,
+            "message": "down",
+            "models": [],
+            "count": 0,
+        }
+
+    monkeypatch.setattr(setup_service, "test_ollama", fake_ollama)
+    monkeypatch.setattr(setup_service, "test_litellm_import", lambda: {
+        "id": "litellm_import",
+        "ok": True,
+        "message": "ok",
+    })
+    monkeypatch.setattr(settings, "override_model", "ollama/llama3.1:8b")
+
+    report = await setup_service.run_readiness_check(include_inference=False)
+    assert report["chat_ready"] is False
+    assert report["blocking_id"] == "ollama"

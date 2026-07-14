@@ -40,6 +40,25 @@ def test_health(api_client: TestClient) -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_readiness(api_client: TestClient, monkeypatch) -> None:
+    """Readiness endpoint returns chat readiness report."""
+
+    async def fake_readiness(**kwargs):
+        return {
+            "chat_ready": True,
+            "active_model": "ollama/llama3.1:8b",
+            "results": [],
+            "summary": "Models ready for chat",
+            "blocking_message": None,
+            "blocking_id": None,
+        }
+
+    monkeypatch.setattr("agentforge.api.routes.run_readiness_check", fake_readiness)
+    response = api_client.get("/api/readiness")
+    assert response.status_code == 200
+    assert response.json()["chat_ready"] is True
+
+
 def test_settings_get_and_patch(api_client: TestClient) -> None:
     """Settings can be read and updated."""
     get_resp = api_client.get("/api/settings")

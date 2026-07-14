@@ -89,10 +89,20 @@
     "summary_ok": "Modell-Zugriff OK — alle Prüfungen bestanden",
     "summary_partial": "Ollama erreichbar — einige optionale Prüfungen benötigen Aufmerksamkeit",
     "summary_fail": "Ollama nicht erreichbar oder Modelle nicht verfügbar",
+    "litellm_import_ok": "LiteLLM-Stack geladen",
+    "litellm_import_fail": "LiteLLM-Stack-Fehler: {{error}}",
+    "litellm_import_hint": "Versuche: pip install --force-reinstall litellm in backend/.venv",
+    "litellm_inference_ok": "Aktives Modell {{model}} antwortet über LiteLLM: {{response}}",
+    "litellm_inference_fail": "Aktives Modell {{model}} schlägt über LiteLLM fehl: {{error}}",
+    "readiness_ok": "Modelle sind chatbereit",
+    "readiness_fail": "Modelle sind nicht chatbereit",
     "labels": {
       "default_model": "Standard-Modell",
       "registry_ollama": "Registry vs Ollama",
-      "cloud_inference": "Cloud-Inferenz"
+      "cloud_inference": "Cloud-Inferenz",
+      "litellm_import": "LiteLLM-Stack",
+      "litellm_inference": "LiteLLM-Inferenz",
+      "active_model": "Aktives Modell"
     }
   }
 }

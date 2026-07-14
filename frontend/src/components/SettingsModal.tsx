@@ -3,6 +3,7 @@ import type {
   AgentRole,
   AppSettings,
   CloudApiKeyField,
+  ContextPluginInfo,
   LLMRoutingInfo,
   SettingsSavePayload,
   SetupTestReport,
@@ -14,6 +15,7 @@ import { useEscapeClose } from "../hooks/useEscapeClose";
 import { DEFAULT_MEMORY_TOKENS, normalizeMemoryTokens, type MemoryTokenOption } from "../constants/memory";
 import { MemoryTokenSelect } from "./MemoryTokenSelect";
 import { TestResultsList } from "./TestResultsList";
+import { ContextPluginsList } from "./ContextPluginsList";
 import { api } from "../services/api";
 
 interface SettingsModalProps {
@@ -43,6 +45,10 @@ const CLOUD_KEY_FIELDS: Array<{
   { field: "mistral_api_key", labelKey: "settings.mistralKey", hasKeyField: "has_mistral_key", placeholder: "..." },
 ];
 
+type SettingsTabId = "general" | "models" | "cloud" | "memory" | "context" | "agents";
+
+const SETTINGS_TABS: SettingsTabId[] = ["general", "models", "cloud", "memory", "context", "agents"];
+
 export function SettingsModal({
   settings,
   roles,
@@ -64,6 +70,16 @@ export function SettingsModal({
   const [modelTestReport, setModelTestReport] = useState<SetupTestReport | null>(null);
   const [modelTestBusy, setModelTestBusy] = useState(false);
   const [modelTestError, setModelTestError] = useState("");
+  const [contextPlugins, setContextPlugins] = useState<ContextPluginInfo[]>([]);
+  const [enabledContextPlugins, setEnabledContextPlugins] = useState<string[]>([]);
+  const [contextPluginsError, setContextPluginsError] = useState("");
+  const [activeTab, setActiveTab] = useState<SettingsTabId>("general");
+
+  useEffect(() => {
+    if (open) {
+      setActiveTab("general");
+    }
+  }, [open]);
 
   useEffect(() => {
     if (settings) {
@@ -77,8 +93,21 @@ export function SettingsModal({
       setModelTestReport(null);
       setModelTestError("");
       setModelTestBusy(false);
+      return;
     }
-  }, [open]);
+
+    void api.getContextCatalog()
+      .then((catalog) => {
+        setContextPlugins(catalog.plugins);
+        setEnabledContextPlugins(catalog.enabled);
+        setContextPluginsError("");
+      })
+      .catch(() => {
+        setContextPlugins([]);
+        setEnabledContextPlugins([]);
+        setContextPluginsError(t("settings.contextPluginsLoadError"));
+      });
+  }, [open, t]);
 
   useEscapeClose(open, onClose);
 
@@ -155,10 +184,37 @@ export function SettingsModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal settings-modal" onClick={(e) => e.stopPropagation()}>
         <h2>{t("settings.title")}</h2>
         <form ref={formRef} className="modal-form" onSubmit={handleSubmit}>
+          <div
+            className="settings-tabs"
+            role="tablist"
+            aria-label={t("settings.title")}
+          >
+            {SETTINGS_TABS.map((tabId) => (
+              <button
+                key={tabId}
+                type="button"
+                role="tab"
+                id={`settings-tab-${tabId}`}
+                aria-selected={activeTab === tabId}
+                aria-controls={`settings-panel-${tabId}`}
+                className={`settings-tab${activeTab === tabId ? " settings-tab--active" : ""}`}
+                onClick={() => setActiveTab(tabId)}
+              >
+                {t(`settings.tabs.${tabId}`)}
+              </button>
+            ))}
+          </div>
           <div className="modal-body">
+          <div
+            id="settings-panel-general"
+            role="tabpanel"
+            aria-labelledby="settings-tab-general"
+            hidden={activeTab !== "general"}
+            className="settings-tab-panel"
+          >
           <label>
             {t("settings.language")}
             <select
@@ -173,12 +229,30 @@ export function SettingsModal({
             </select>
           </label>
           <label>
+            {t("settings.appearance")}
+            <select
+              value={theme}
+              onChange={(event) => onThemeChange(event.target.value as ThemeMode)}
+            >
+              <option value="dark">{t("settings.darkMode")}</option>
+              <option value="light">{t("settings.lightMode")}</option>
+            </select>
+          </label>
+          <label>
             {t("settings.workspaceRoot")}
             <input
               name="workspace_root"
               defaultValue={settings.workspace_root}
             />
           </label>
+          </div>
+          <div
+            id="settings-panel-models"
+            role="tabpanel"
+            aria-labelledby="settings-tab-models"
+            hidden={activeTab !== "models"}
+            className="settings-tab-panel"
+          >
           <label>
             {t("settings.ollamaUrl")}
             <input
@@ -193,6 +267,14 @@ export function SettingsModal({
               defaultValue={settings.default_model}
               placeholder={t("settings.defaultModelHint")}
             />
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={autoRouting}
+              onChange={(event) => setAutoRouting(event.target.checked)}
+            />
+            {t("settings.autoRouting")}
           </label>
           <section className="settings-model-test">
             <div className="settings-model-test-header">
@@ -228,14 +310,27 @@ export function SettingsModal({
             )}
             {modelTestError && <p className="setup-error">{modelTestError}</p>}
           </section>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={autoRouting}
-              onChange={(event) => setAutoRouting(event.target.checked)}
-            />
-            {t("settings.autoRouting")}
-          </label>
+          <div className="models-open-row">
+            <button type="button" className="btn-primary" onClick={onOpenModels}>
+              {t("settings.manageModelsRouting")}
+            </button>
+            {routing && (
+              <span className="routing-hint">
+                {t("settings.modelsHint", {
+                  models: routing.models.length,
+                  installed: routing.installed.length,
+                })}
+              </span>
+            )}
+          </div>
+          </div>
+          <div
+            id="settings-panel-cloud"
+            role="tabpanel"
+            aria-labelledby="settings-tab-cloud"
+            hidden={activeTab !== "cloud"}
+            className="settings-tab-panel"
+          >
           <section className="settings-cloud-providers">
             <h4>{t("settings.cloudProviders")}</h4>
             <p className="settings-cloud-providers-hint">{t("settings.cloudProvidersHint")}</p>
@@ -251,36 +346,48 @@ export function SettingsModal({
               </label>
             ))}
           </section>
-          <label>
-            {t("settings.memoryTokens")}
-            <MemoryTokenSelect
-              value={defaultMemoryTokens}
-              onChange={setDefaultMemoryTokens}
-            />
-          </label>
-          <label>
-            {t("settings.appearance")}
-            <select
-              value={theme}
-              onChange={(event) => onThemeChange(event.target.value as ThemeMode)}
-            >
-              <option value="dark">{t("settings.darkMode")}</option>
-              <option value="light">{t("settings.lightMode")}</option>
-            </select>
-          </label>
-          <div className="models-open-row">
-            <button type="button" className="btn-primary" onClick={onOpenModels}>
-              {t("settings.manageModelsRouting")}
-            </button>
-            {routing && (
-              <span className="routing-hint">
-                {t("settings.modelsHint", {
-                  models: routing.models.length,
-                  installed: routing.installed.length,
-                })}
-              </span>
-            )}
           </div>
+          <div
+            id="settings-panel-memory"
+            role="tabpanel"
+            aria-labelledby="settings-tab-memory"
+            hidden={activeTab !== "memory"}
+            className="settings-tab-panel"
+          >
+          <section className="settings-memory">
+            <h4>{t("settings.memoryTokens")}</h4>
+            <p className="settings-memory-hint">{t("settings.memoryTokensHint")}</p>
+            <label>
+              {t("settings.memoryTokensSize")}
+              <MemoryTokenSelect
+                value={defaultMemoryTokens}
+                onChange={setDefaultMemoryTokens}
+              />
+            </label>
+            <p className="settings-memory-note">{t("settings.memoryPerChatOnly")}</p>
+          </section>
+          </div>
+          <div
+            id="settings-panel-context"
+            role="tabpanel"
+            aria-labelledby="settings-tab-context"
+            hidden={activeTab !== "context"}
+            className="settings-tab-panel"
+          >
+          <section className="settings-context-plugins">
+            <h4>{t("settings.contextPlugins")}</h4>
+            <p className="settings-context-plugins-hint">{t("settings.contextPluginsHint")}</p>
+            <ContextPluginsList plugins={contextPlugins} enabled={enabledContextPlugins} />
+            {contextPluginsError && <p className="setup-error">{contextPluginsError}</p>}
+          </section>
+          </div>
+          <div
+            id="settings-panel-agents"
+            role="tabpanel"
+            aria-labelledby="settings-tab-agents"
+            hidden={activeTab !== "agents"}
+            className="settings-tab-panel"
+          >
           <div className="roles-preview">
             <h4>{t("settings.availableRoles", { count: roles.length })}</h4>
             <ul>
@@ -290,6 +397,7 @@ export function SettingsModal({
                 </li>
               ))}
             </ul>
+          </div>
           </div>
           </div>
           <div className="modal-actions">

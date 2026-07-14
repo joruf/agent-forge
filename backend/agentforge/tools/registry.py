@@ -486,7 +486,7 @@ class RememberTool(BaseTool):
     """Store information in persistent memory."""
 
     name = "remember"
-    description = "Store a key-value fact in chat or global memory"
+    description = "Store a key-value fact in this chat's memory"
 
     def __init__(self, memory_callback=None) -> None:
         """Initialize with memory store callback."""
@@ -504,7 +504,7 @@ class RememberTool(BaseTool):
                     "properties": {
                         "key": {"type": "string"},
                         "value": {"type": "string"},
-                        "scope": {"type": "string", "enum": ["chat", "global"], "default": "chat"},
+                        "scope": {"type": "string", "enum": ["chat"], "default": "chat"},
                     },
                     "required": ["key", "value"],
                 },
@@ -516,7 +516,7 @@ class RememberTool(BaseTool):
         if not self.memory_callback:
             return ToolCallResult(tool=self.name, success=False, output="Memory not available")
         await self.memory_callback(
-            arguments.get("scope", "chat"),
+            "chat",
             arguments["key"],
             arguments["value"],
         )

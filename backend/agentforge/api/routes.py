@@ -5,7 +5,7 @@ import json
 from collections import defaultdict
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from agentforge.agents.approval_manager import approval_manager
@@ -29,13 +29,34 @@ from agentforge.models.schemas import (
     OrchestrationMode,
 )
 from agentforge.llm.cloud_providers import cloud_key_flags
-from agentforge.services.setup_service import run_all_tests, run_model_access_tests
+from agentforge.context import context_registry
+from agentforge.context.catalog import catalog_as_dict
+from agentforge.services.setup_service import run_all_tests, run_model_access_tests, run_readiness_check
 from agentforge.storage.conversation_store import conversation_store
 from agentforge.storage.setup_store import setup_store
 
 router = APIRouter()
 _CHAT_SOCKETS: dict[str, set[WebSocket]] = defaultdict(set)
 DEFAULT_CHAT_TITLE = "New Chat"
+
+
+def _client_ip(request: Request | None = None, websocket: WebSocket | None = None) -> str:
+    """
+    Extract the best available client IP from HTTP or WebSocket connections.
+
+    :param request: Optional HTTP request
+    :param websocket: Optional WebSocket connection
+    :return: Client IP address or empty string
+    """
+    if request is not None:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        if request.client:
+            return request.client.host or ""
+    if websocket is not None and websocket.client:
+        return websocket.client.host or ""
+    return ""
 
 
 def _fallback_chat_title(user_content: str) -> str:
@@ -214,6 +235,75 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "app": settings.app_name}
 
 
+@router.get("/readiness")
+async def readiness(include_inference: bool = False) -> dict[str, Any]:
+    """Return whether configured models are ready for chat orchestration."""
+    return await run_readiness_check(include_inference=include_inference)
+
+
+@router.get("/context/catalog")
+async def context_catalog() -> dict[str, Any]:
+    """Return metadata for available context plugins."""
+    return {
+        "plugins": catalog_as_dict(),
+        "enabled": settings.context_plugins_enabled_list if settings.context_plugins_enabled else [],
+    }
+
+
+@router.get("/context/startup")
+async def context_startup(refresh: bool = False) -> dict[str, Any]:
+    """Return startup ambient context snapshot."""
+    if not settings.context_plugins_enabled:
+        return {"mode": "startup", "text": "", "results": [], "cached": False, "enabled": False}
+    payload = await context_registry.build_startup(force_refresh=refresh)
+    payload["enabled"] = True
+    return payload
+
+
+class ContextResolveRequest(BaseModel):
+    """Request body for resolving context plugins."""
+
+    content: str = ""
+    plugin_id: str | None = None
+
+
+@router.post("/context/resolve")
+async def context_resolve(data: ContextResolveRequest, request: Request) -> dict[str, Any]:
+    """Resolve JIT context plugins for arbitrary text."""
+    if not settings.context_plugins_enabled:
+        return {"text": "", "results": [], "enabled": False}
+    if data.plugin_id:
+        from agentforge.context.base import ContextRequest
+
+        result = await context_registry.resolve_plugin(
+            data.plugin_id,
+            ContextRequest(
+                user_content=data.content,
+                force=True,
+                client_ip=_client_ip(request),
+            ),
+        )
+        return {
+            "enabled": True,
+            "text": result.text if result.ok else "",
+            "results": [
+                {
+                    "plugin_id": result.plugin_id,
+                    "ok": result.ok,
+                    "text": result.text,
+                    "error": result.error,
+                    "data": result.data,
+                }
+            ],
+        }
+    payload = await context_registry.build_for_content(
+        data.content,
+        client_ip=_client_ip(request),
+    )
+    payload["enabled"] = True
+    return payload
+
+
 @router.get("/settings")
 async def get_settings() -> dict[str, Any]:
     """Return current application settings."""
@@ -227,6 +317,14 @@ async def get_settings() -> dict[str, Any]:
         "override_model": settings.override_model.strip() or None,
         "command_whitelist": settings.command_whitelist,
         "command_blacklist": settings.command_blacklist,
+        "context_plugins_enabled": settings.context_plugins_enabled,
+        "context_plugins_enabled_list": settings.context_plugins_enabled_list,
+        "context_timezone": settings.context_timezone,
+        "context_country_code": settings.context_country_code,
+        "context_city": settings.context_city,
+        "context_latitude": settings.context_latitude,
+        "context_longitude": settings.context_longitude,
+        "context_exchange_base": settings.context_exchange_base,
         **cloud_key_flags(),
         "ui_language": settings.ui_language,
     }
@@ -530,7 +628,7 @@ class SendMessageRequest(BaseModel):
 
 
 @router.post("/chats/{chat_id}/messages")
-async def send_message(chat_id: str, data: SendMessageRequest):
+async def send_message(chat_id: str, data: SendMessageRequest, request: Request):
     """Send a user message and run orchestration."""
     try:
         chat = await conversation_store.get_chat(chat_id)
@@ -553,6 +651,7 @@ async def send_message(chat_id: str, data: SendMessageRequest):
         mode,
         role_ids,
         record_user_message=not data.retry,
+        client_ip=_client_ip(request),
     )
     if title_task is not None:
         result.title = await title_task
@@ -579,6 +678,14 @@ async def respond_approval(chat_id: str, approval_id: str, data: ApprovalRespons
             "message": json.loads(msg.model_dump_json()) if msg else None,
         },
     )
+    if msg and isinstance(msg.metadata, dict) and msg.metadata.get("kind") == "shell_command":
+        await _broadcast_chat_event(
+            chat_id,
+            {
+                "type": "shell_command_recorded",
+                "entry": AgentOrchestrator._serialize_shell_command_entry(msg),
+            },
+        )
     return {"approved": data.approved, "message": msg}
 
 
@@ -638,6 +745,7 @@ async def chat_websocket(websocket: WebSocket, chat_id: str) -> None:
                 on_event=on_event,
                 intervention_queue=intervention_queue,
                 record_user_message=not bool(payload.get("retry")),
+                client_ip=_client_ip(websocket=websocket),
             )
             if title_task is not None:
                 result.title = await title_task

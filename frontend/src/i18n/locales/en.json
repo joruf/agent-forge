@@ -6,6 +6,31 @@
     "reconnect": "Reconnect",
     "sidebarResize": "Adjust menu width"
   },
+  "readiness": {
+    "title": "Models not ready",
+    "activeModel": "Active model: {{model}}",
+    "recheck": "Check again",
+    "checking": "Checking…",
+    "openSettings": "Settings",
+    "showDetails": "Show details",
+    "hideDetails": "Hide details",
+    "chatBlocked": "Chat is disabled until the model check succeeds."
+  },
+  "context": {
+    "title": "Startup context",
+    "chatTitle": "Context plugins",
+    "showPlugins": "Show plugins",
+    "hidePlugins": "Hide plugins",
+    "noApiKey": "No API key",
+    "apiKeyRequired": "API key required",
+    "running": "running…",
+    "executed": "executed",
+    "failed": "failed",
+    "loadingPlugin": "Loading plugin…",
+    "reasonIntent": "Triggered by your message",
+    "reasonProcess": "Triggered by the AI process",
+    "pluginLabel": "Plugin {{name}}"
+  },
   "sidebar": {
     "settings": "Settings",
     "menu": "Menu",
@@ -64,6 +89,22 @@
     "inputPlaceholderMultiActive": "Join the discussion… (Enter to send, Shift+Enter or Ctrl+Enter for new line)",
     "send": "Send"
   },
+  "shellCommands": {
+    "open": "Show console commands",
+    "openWithCount": "Show console commands ({{count}} executed)",
+    "title": "Console commands",
+    "close": "Close",
+    "empty": "No shell commands have been executed in this chat yet.",
+    "cwd": "Directory: {{cwd}}",
+    "exitCode": "Exit {{code}}",
+    "status": {
+      "success": "Succeeded",
+      "failed": "Failed",
+      "blocked": "Blocked",
+      "pending": "Awaiting approval",
+      "denied": "Denied"
+    }
+  },
   "settings": {
     "title": "Settings",
     "workspaceRoot": "Workspace directory",
@@ -79,6 +120,9 @@
     "cloudProvidersHint": "Optional API keys for OpenAI, Claude, Gemini, Groq, and Mistral. Use LiteLLM model IDs as default model, e.g. anthropic/claude-3-5-haiku-20241022.",
     "defaultModelHint": "ollama/llama3.1:8b, gpt-4o-mini, anthropic/claude-3-5-haiku-20241022, gemini/gemini-2.0-flash",
     "memoryTokens": "Memory (tokens)",
+    "memoryTokensSize": "Memory size",
+    "memoryTokensHint": "Sets how much context memory each chat may use for persistent remember-tool facts.",
+    "memoryPerChatOnly": "Memory always applies to the current chat only.",
     "appearance": "Appearance",
     "darkMode": "Dark mode",
     "lightMode": "Light mode",
@@ -92,7 +136,21 @@
     "modelAccessHint": "Check whether Ollama is reachable and your configured models are available.",
     "testModels": "Test model access",
     "testingModels": "Testing…",
-    "testInference": "Run short inference test (may take up to 2 minutes)"
+    "testInference": "Run short inference test (may take up to 2 minutes)",
+    "contextPlugins": "Context plugins",
+    "contextPluginsHint": "These plugins load on demand in chat when your input or the AI process requires them.",
+    "contextPluginsEmpty": "No context plugins available.",
+    "contextPluginsLoadError": "Could not load context plugins.",
+    "contextPluginEnabled": "Enabled",
+    "contextPluginDisabled": "Disabled",
+    "tabs": {
+      "general": "General",
+      "models": "Models",
+      "cloud": "Cloud",
+      "memory": "Memory",
+      "context": "Context",
+      "agents": "Agents"
+    }
   },
   "about": {
     "title": "About AgentForge",
