@@ -212,8 +212,10 @@ export default function App() {
   };
 
   const handleDeleteChat = async (id: string) => {
+    const deletedIndex = chats.findIndex((chat) => chat.id === id);
     await api.deleteChat(id);
-    setChats((prev) => prev.filter((c) => c.id !== id));
+    const remaining = chats.filter((chat) => chat.id !== id);
+    setChats(remaining);
     setChatRunStatus((prev) => {
       if (!(id in prev)) {
         return prev;
@@ -223,7 +225,15 @@ export default function App() {
       return next;
     });
     if (activeChatId === id) {
-      setActiveChatId(null);
+      if (remaining.length === 0) {
+        setActiveChatId(null);
+        return;
+      }
+      const nextIndex = Math.min(
+        deletedIndex >= 0 ? deletedIndex : 0,
+        remaining.length - 1,
+      );
+      setActiveChatId(remaining[nextIndex].id);
     }
   };
 

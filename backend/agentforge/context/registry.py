@@ -111,6 +111,7 @@ class ContextRegistry:
         on_event: ContextEventCallback | None = None,
         process_context: str = "",
         client_ip: str = "",
+        workspace_task_active: bool = False,
     ) -> str:
         """
         Build ambient context for a chat message.
@@ -123,6 +124,7 @@ class ContextRegistry:
         :param on_event: Optional callback for plugin lifecycle events
         :param process_context: Optional orchestration text used for detection
         :param client_ip: Optional client IP for location-aware plugins
+        :param workspace_task_active: When True, skip plugins for workspace file tasks
         :return: Combined context text for system prompt injection
         """
         payload = await self.build_for_message_report(
@@ -131,6 +133,7 @@ class ContextRegistry:
             on_event=on_event,
             process_context=process_context,
             client_ip=client_ip,
+            workspace_task_active=workspace_task_active,
         )
         text = payload.get("text") or ""
         if not text:
@@ -144,6 +147,7 @@ class ContextRegistry:
         on_event: ContextEventCallback | None = None,
         process_context: str = "",
         client_ip: str = "",
+        workspace_task_active: bool = False,
     ) -> dict[str, Any]:
         """
         Build ambient context and emit plugin lifecycle events.
@@ -153,9 +157,10 @@ class ContextRegistry:
         :param on_event: Optional callback for plugin lifecycle events
         :param process_context: Optional orchestration text used for detection
         :param client_ip: Optional client IP for location-aware plugins
+        :param workspace_task_active: When True, skip plugins for workspace file tasks
         :return: Structured context payload
         """
-        if not settings.context_plugins_enabled:
+        if not settings.context_plugins_enabled or workspace_task_active:
             return {
                 "mode": "message",
                 "text": "",
@@ -171,9 +176,15 @@ class ContextRegistry:
             client_ip=client_ip,
         )
         required = self._filter_enabled(
-            detect_required_plugins(user_content, process_context=process_context)
+            detect_required_plugins(
+                user_content,
+                workspace_task_active=workspace_task_active,
+            )
         )
-        selection = explain_required_plugins(user_content, process_context=process_context)
+        selection = explain_required_plugins(
+            user_content,
+            workspace_task_active=workspace_task_active,
+        )
 
         if not required:
             return {

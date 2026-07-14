@@ -14,6 +14,8 @@ class WorkspaceIntent:
     """Parsed workspace action intent from user input."""
 
     wants_file_creation: bool = False
+    wants_file_read: bool = False
+    wants_list_directory: bool = False
     wants_directory_creation: bool = False
     wants_command_execution: bool = False
     target_paths: list[str] = field(default_factory=list)
@@ -29,6 +31,8 @@ class WorkspaceIntent:
         """
         return (
             self.wants_file_creation
+            or self.wants_file_read
+            or self.wants_list_directory
             or self.wants_directory_creation
             or self.wants_command_execution
         )
@@ -39,6 +43,32 @@ class WorkspaceIntent:
 
         :return: Additional prompt text or empty string
         """
+        if self.wants_file_read:
+            lines = [
+                "\n\nWorkspace read action required:",
+                "The user wants existing file content shown in chat — not written to disk.",
+                "You MUST use read_file for each requested path and quote the content verbatim.",
+                "Never reply with only JSON, status placeholders, or invented file contents.",
+                "Do not call write_file unless the user explicitly asked to create or modify files.",
+            ]
+            if self.target_paths:
+                paths = ", ".join(self.target_paths)
+                lines.append(f"Target path(s) (relative to workspace root): {paths}")
+            if self.raw_paths:
+                raw = ", ".join(self.raw_paths)
+                lines.append(f"User-mentioned path(s): {raw}")
+            return "\n".join(lines)
+
+        if self.wants_list_directory:
+            lines = [
+                "\n\nDirectory listing required:",
+                "Use list_directory to inspect the requested folder and summarize the entries.",
+            ]
+            if self.target_dirs:
+                dirs = ", ".join(self.target_dirs)
+                lines.append(f"Target directory (relative to workspace root): {dirs}")
+            return "\n".join(lines)
+
         if not self.requires_tools:
             return ""
 
@@ -74,10 +104,37 @@ CREATE_KEYWORDS = re.compile(
     r"speichern|speichere|speichert|abspeichern|gespeichert|abzuspeichern|"
     r"erstellen|erstellt|erzeuge|erzeugen|anlegen|anlege|"
     r"generiere|generieren|schreibe|schreiben|"
-    r"file|files|datei|dateien|verzeichnis|ordner|directory|folder|"
+    r"verzeichnis|ordner|directory|folder|"
     r"programm|program|script|skript|entwurf|template|"
     r"header|footer|menü|menu|content|"
     r"mkdir|touch|kopieren|copy to|implement|implementier"
+    r")\b",
+    re.IGNORECASE,
+)
+
+READ_KEYWORDS = re.compile(
+    r"\b("
+    r"read|reads|reading|lese|lies|lesen|anzeigen|anzeige|zeige|zeig|show|display|"
+    r"ausgeben|ausgabe|auflisten|liste|list|inhalt|contents|dateiinhalt|"
+    r"file content|get content|print|output|darstellen|mitteilen|nenne mir|gib mir|"
+    r"what is in|was steht|was ist in|open file|öffne|oeffne"
+    r")\b",
+    re.IGNORECASE,
+)
+
+LIST_DIRECTORY_KEYWORDS = re.compile(
+    r"\b("
+    r"list directory|list dir|list folder|verzeichnis auflisten|ordner auflisten|"
+    r"verzeichnis anzeigen|ordner anzeigen|directory listing|folder listing|"
+    r"was liegt in|what is in the folder|dateien im ordner|files in folder"
+    r")\b",
+    re.IGNORECASE,
+)
+
+WRITE_VERBS = re.compile(
+    r"\b("
+    r"create|write|save|speicher|speichern|erstell|generier|schreib|implement|"
+    r"mkdir|touch|anleg|abspeicher"
     r")\b",
     re.IGNORECASE,
 )
@@ -92,8 +149,9 @@ COMMAND_KEYWORDS = re.compile(
 ABS_PATH = re.compile(r"(?<![\w./-])(/[\w./-]+)")
 PATH_AFTER_KEYWORD = re.compile(
     r"(?:"
-    r"(?:speicher(?:n|e|t)?|save|store|write|create|erstell(?:en|t)?|unter|under|in|to|nach|path|pfad)"
-    r"\s*(?:den code|the code|es|it|them|die datei(?:en)?|files?)?\s*)?"
+    r"(?:speicher(?:n|e|t)?|save|store|write|create|erstell(?:en|t)?|unter|under|in|to|nach|path|pfad|"
+    r"lese|lies|read|zeige|show|open|öffne|oeffne)"
+    r"\s*(?:den code|the code|es|it|them|die datei(?:en)?|files?|inhalt|content)?\s*)?"
     r":?\s*"
     r"(/[\w./-]+)",
     re.IGNORECASE,
@@ -123,13 +181,16 @@ def extract_named_folder(user_content: str) -> str | None:
     :param user_content: User message text
     :return: Folder basename or None
     """
-    match = NAMED_FOLDER.search(user_content or "")
-    if not match:
-        return None
-    name = match.group(1).strip().strip(".")
-    if not name or name.lower() in {"mit", "dem", "namen", "name", "der", "die", "das"}:
-        return None
-    return name
+    for match in NAMED_FOLDER.finditer(user_content or ""):
+        name = match.group(1).strip().strip(".")
+        if (
+            not name
+            or name.startswith("_")
+            or name.lower() in {"mit", "dem", "namen", "name", "der", "die", "das", "workspace"}
+        ):
+            continue
+        return name
+    return None
 
 
 def _to_workspace_relative(path_str: str) -> tuple[str | None, str | None]:
@@ -196,13 +257,15 @@ def _extract_paths(user_content: str) -> list[str]:
 
 def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
     """
-    Detect whether the user wants files or directories created in the workspace.
+    Detect whether the user wants files read, created, or listed in the workspace.
 
     :param user_content: User message text
     :return: Parsed workspace intent
     """
     text = user_content or ""
-    wants_create = CREATE_KEYWORDS.search(text) is not None
+    wants_list = LIST_DIRECTORY_KEYWORDS.search(text) is not None
+    wants_create = CREATE_KEYWORDS.search(text) is not None and not wants_list
+    wants_read = READ_KEYWORDS.search(text) is not None
     wants_command = COMMAND_KEYWORDS.search(text) is not None
     raw_paths = _extract_paths(text)
 
@@ -220,11 +283,16 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
         text,
         re.IGNORECASE,
     )
-    wants_file_creation = wants_create or bool(save_phrase and raw_paths)
+    wants_write = wants_create or bool(save_phrase and raw_paths)
+    wants_file_read = wants_read and not wants_list and not (
+        wants_write and WRITE_VERBS.search(text)
+    )
+    wants_file_creation = wants_write and not wants_file_read
     wants_directory_creation = wants_file_creation and bool(target_dirs)
+    wants_list_directory = wants_list and not wants_file_read and not wants_file_creation
 
     named_folder = extract_named_folder(text)
-    if named_folder and target_dirs:
+    if named_folder and target_dirs and wants_file_creation:
         enriched_dirs: list[str] = []
         enriched_paths: list[str] = []
         for directory in target_dirs:
@@ -252,6 +320,8 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
 
     return WorkspaceIntent(
         wants_file_creation=wants_file_creation,
+        wants_file_read=wants_file_read,
+        wants_list_directory=wants_list_directory,
         wants_directory_creation=wants_directory_creation,
         wants_command_execution=wants_command,
         target_paths=target_paths,

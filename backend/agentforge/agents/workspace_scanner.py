@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agentforge.agents.workspace_intent import WorkspaceIntent
 from agentforge.config import settings
+from agentforge.services.command_audit import record_list_directory, record_read_file
 from agentforge.tools.registry import _resolve_path
 
 IMPORTANT_FILE_NAMES: frozenset[str] = frozenset({
@@ -112,7 +113,7 @@ def _score_file(path: Path) -> tuple[int, str]:
     return (9, name.lower())
 
 
-def _read_file_excerpt(relative_path: str) -> str | None:
+async def _read_file_excerpt(relative_path: str) -> str | None:
     """
     Read a workspace file with truncation.
 
@@ -122,16 +123,23 @@ def _read_file_excerpt(relative_path: str) -> str | None:
     try:
         absolute = _resolve_path(relative_path)
         if not absolute.is_file():
+            await record_read_file(
+                relative_path,
+                output=f"File not found: {relative_path}",
+                success=False,
+            )
             return None
         content = absolute.read_text(encoding="utf-8", errors="replace")
         if len(content) > MAX_FILE_CHARS:
-            return content[:MAX_FILE_CHARS] + "\n... [truncated]"
+            content = content[:MAX_FILE_CHARS] + "\n... [truncated]"
+        await record_read_file(relative_path, output=content, success=True)
         return content
-    except (OSError, PermissionError, UnicodeError):
+    except (OSError, PermissionError, UnicodeError) as exc:
+        await record_read_file(relative_path, output=str(exc), success=False)
         return None
 
 
-def _scan_directory(relative_dir: str) -> str:
+async def _scan_directory(relative_dir: str) -> str:
     """
     Scan one workspace directory and return a formatted summary.
 
@@ -141,30 +149,40 @@ def _scan_directory(relative_dir: str) -> str:
     try:
         absolute = _resolve_path(relative_dir)
     except PermissionError:
-        return f"Directory `{relative_dir}` is outside the workspace root."
+        summary = f"Directory `{relative_dir}` is outside the workspace root."
+        await record_list_directory(relative_dir, output=summary, success=False)
+        return summary
 
     if absolute.is_file():
         relative_dir = str(Path(relative_dir).parent)
         try:
             absolute = _resolve_path(relative_dir)
         except PermissionError:
-            return f"Path `{relative_dir}` is outside the workspace root."
+            summary = f"Path `{relative_dir}` is outside the workspace root."
+            await record_list_directory(relative_dir, output=summary, success=False)
+            return summary
 
     if not absolute.exists():
-        return (
+        summary = (
             f"Directory `{relative_dir}` does not exist yet "
             f"(relative to workspace root `{settings.workspace_root}`)."
         )
+        await record_list_directory(relative_dir, output=summary, success=False)
+        return summary
 
     if not absolute.is_dir():
-        return f"Path `{relative_dir}` is not a directory."
+        summary = f"Path `{relative_dir}` is not a directory."
+        await record_list_directory(relative_dir, output=summary, success=False)
+        return summary
 
     entries = sorted(absolute.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
     lines = [f"Directory `{relative_dir}`:"]
 
     if not entries:
         lines.append("- (empty)")
-        return "\n".join(lines)
+        summary = "\n".join(lines)
+        await record_list_directory(relative_dir, output=summary, success=True)
+        return summary
 
     for entry in entries[:MAX_DIR_ENTRIES]:
         prefix = "[DIR]" if entry.is_dir() else "[FILE]"
@@ -175,11 +193,14 @@ def _scan_directory(relative_dir: str) -> str:
     files = [entry for entry in entries if entry.is_file()]
     ranked = sorted(files, key=_score_file)[:MAX_READ_FILES]
 
+    listing_output = "\n".join(lines)
+    await record_list_directory(relative_dir, output=listing_output, success=True)
+
     for entry in ranked:
         if _score_file(entry)[0] > 2 and entry.name not in IMPORTANT_FILE_NAMES:
             continue
         relative_file = str(Path(relative_dir) / entry.name)
-        excerpt = _read_file_excerpt(relative_file)
+        excerpt = await _read_file_excerpt(relative_file)
         if not excerpt:
             continue
         lines.append("")
@@ -189,18 +210,42 @@ def _scan_directory(relative_dir: str) -> str:
     return "\n".join(lines)
 
 
-def build_workspace_path_context(intent: WorkspaceIntent) -> str:
+async def build_workspace_path_context(intent: WorkspaceIntent) -> str:
     """
     Build workspace context for paths mentioned in the user request.
 
     :param intent: Parsed workspace intent
     :return: Context block for system prompts or empty string
     """
+    if intent.wants_file_read:
+        contents: dict[str, str] = {}
+        for relative in intent.target_paths:
+            if not Path(relative).suffix:
+                continue
+            excerpt = await _read_file_excerpt(relative)
+            if excerpt is not None:
+                contents[relative] = excerpt
+            else:
+                contents[relative] = f"[ERROR] File not found: {relative}"
+        if contents:
+            lines = [
+                "Verified file content from disk (use this in your response; do not invent text):",
+            ]
+            for relative_path, payload in contents.items():
+                lines.append(f"\nFile `{relative_path}`:")
+                if payload.startswith("[ERROR]"):
+                    lines.append(payload)
+                else:
+                    lines.append("```")
+                    lines.append(payload)
+                    lines.append("```")
+            return "\n".join(lines)
+
     targets = _scan_targets(intent)
     if not targets:
         return ""
 
-    sections = [_scan_directory(target) for target in targets]
+    sections = [await _scan_directory(target) for target in targets]
     body = "\n\n".join(section for section in sections if section)
     if not body:
         return ""

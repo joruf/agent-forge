@@ -20,7 +20,14 @@ PLUGIN_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"\b(wetter|weather|forecast|vorhersage|temperatur|temperature)\b", re.I),
         re.compile(r"\b(regen|rain|schnee|snow|wind|bewölkt|cloudy)\b", re.I),
         re.compile(r"\b(wie warm|how hot|how cold|wird es regnen)\b", re.I),
-        re.compile(r"\b(hier|here|bei mir|near me|my location|wo ich bin|in der nähe)\b", re.I),
+        re.compile(
+            r"\b(wetter|weather|temperatur|temperature)\b.{0,40}\b(hier|here|bei mir|near me)\b",
+            re.I,
+        ),
+        re.compile(
+            r"\b(hier|here|bei mir|near me)\b.{0,40}\b(wetter|weather|temperatur|temperature)\b",
+            re.I,
+        ),
     ),
     "holidays": (
         re.compile(r"\b(feiertag|feiertage|holiday|holidays|public holiday)\b", re.I),
@@ -55,15 +62,20 @@ def detect_required_plugins(
     user_content: str,
     *,
     process_context: str = "",
+    workspace_task_active: bool = False,
 ) -> list[str]:
     """
     Decide which context plugins should load for the given text.
 
     :param user_content: User message text
     :param process_context: Optional extra text from orchestration context
+    :param workspace_task_active: When True, skip ambient plugins for workspace tasks
     :return: Ordered list of plugin identifiers to resolve
     """
-    text = "\n".join(part.strip() for part in (user_content, process_context) if part and part.strip())
+    if workspace_task_active:
+        return []
+
+    text = user_content.strip()
     if not text:
         return []
 
@@ -105,15 +117,21 @@ def explain_required_plugins(
     user_content: str,
     *,
     process_context: str = "",
+    workspace_task_active: bool = False,
 ) -> list[dict[str, str]]:
     """
     Return human-readable reasons why plugins were selected.
 
     :param user_content: User message text
     :param process_context: Optional extra text from orchestration context
+    :param workspace_task_active: When True, skip ambient plugins for workspace tasks
     :return: List of plugin id and reason pairs
     """
-    required = detect_required_plugins(user_content, process_context=process_context)
+    required = detect_required_plugins(
+        user_content,
+        process_context=process_context,
+        workspace_task_active=workspace_task_active,
+    )
     reasons: list[dict[str, str]] = []
     user_matches = set(detect_required_plugins(user_content))
     for plugin_id in required:

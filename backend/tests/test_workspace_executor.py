@@ -91,12 +91,12 @@ async def test_write_file_direct_creates_nested_directory(
     monkeypatch.setattr(settings, "workspace_root", tmp_path)
     success, output = await write_file_direct(
         "GitHub/Test/index.php",
-        "<?php echo 'hello';",
+        "<?php echo 'Hello World';",
     )
     target = tmp_path / "GitHub" / "Test" / "index.php"
     assert success is True
     assert target.is_file()
-    assert "hello" in target.read_text(encoding="utf-8")
+    assert "Hello World" in target.read_text(encoding="utf-8")
     assert "Written:" in output
 
 

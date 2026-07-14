@@ -122,6 +122,36 @@ class MemoryStore:
                 )
             await db.commit()
 
+    async def get_entry(
+        self,
+        chat_id: str | None,
+        scope: str,
+        key: str,
+    ) -> str | None:
+        """
+        Read one memory entry value.
+
+        :param chat_id: Chat session ID or None for global scope
+        :param scope: Memory scope label
+        :param key: Memory key
+        :return: Stored value or None
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT value FROM memory_entries
+                WHERE scope = ? AND key = ? AND (chat_id = ? OR (chat_id IS NULL AND ? IS NULL))
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (scope, key, chat_id, chat_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return row["value"]
+
     async def list_entries(self, chat_id: str | None = None) -> list[dict]:
         """List memory entries for inspection."""
         async with aiosqlite.connect(self.db_path) as db:

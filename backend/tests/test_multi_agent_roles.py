@@ -100,6 +100,9 @@ async def test_multi_agent_developer_tools_then_reviewer(monkeypatch, tmp_path) 
         mode_multi: bool = False,
         intervention_queue=None,
         workspace_intent=None,
+        task_state=None,
+        round_num=0,
+        **kwargs,
     ):
         if agent_id == "project_manager":
             if "Final synthesis requested." in messages[1]["content"]:

@@ -19,7 +19,7 @@ USER_PROMPT = (
     "/home/joruf/Dokumente/GitHub\n"
     "einen Ordner mit dem Namen. Test123\n"
     "darin eine Datei mit dem Namen test.txt\n"
-    'in der test.txt schreibst du den Text "Hallo Welt"'
+    'in der test.txt schreibst du den Text "Hello World"'
 )
 
 
@@ -44,7 +44,7 @@ def test_plan_deliverable_files_for_named_subfolder() -> None:
 def test_fallback_txt_uses_quoted_literal() -> None:
     """TXT fallback content uses quoted text from the user request."""
     content = fallback_file_content("GitHub/Test123/test.txt", USER_PROMPT)
-    assert content.strip() == "Hallo Welt"
+    assert content.strip() == "Hello World"
 
 
 @pytest.mark.asyncio
@@ -61,7 +61,7 @@ async def test_missing_requested_files_for_named_subfolder(
         f"{tmp_path}/GitHub\n"
         "einen Ordner mit dem Namen. Test123\n"
         "darin eine Datei mit dem Namen test.txt\n"
-        'in der test.txt schreibst du den Text "Hallo Welt"'
+        'in der test.txt schreibst du den Text "Hello World"'
     )
 
     intent = detect_workspace_intent(prompt)
@@ -77,7 +77,7 @@ def test_build_deliverable_status_summary_reports_missing(monkeypatch, tmp_path:
         f"{tmp_path}/GitHub\n"
         "einen Ordner mit dem Namen. Test123\n"
         "darin eine Datei mit dem Namen test.txt\n"
-        'in der test.txt schreibst du den Text "Hallo Welt"'
+        'in der test.txt schreibst du den Text "Hello World"'
     )
     intent = detect_workspace_intent(prompt)
     summary = build_deliverable_status_summary(prompt, intent)

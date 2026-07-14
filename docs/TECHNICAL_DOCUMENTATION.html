@@ -181,6 +181,10 @@
       <li><a href="#architecture">Architecture</a></li>
       <li><a href="#components">Components</a></li>
       <li><a href="#data-flow">Data Flow</a></li>
+      <li><a href="#orchestrator-internals">Orchestrator Internals</a></li>
+      <li><a href="#workspace-intent">Workspace Intent</a></li>
+      <li><a href="#task-board">Task Board</a></li>
+      <li><a href="#command-audit">Command Audit</a></li>
       <li><a href="#installation">Installation</a></li>
       <li><a href="#configuration">Configuration</a></li>
       <li><a href="#api">REST API</a></li>
@@ -219,7 +223,9 @@
       <p>Core capabilities:</p>
       <ul>
         <li>Single-agent coding mode with tool use (files, shell, memory)</li>
-        <li>Multi-agent orchestration with six built-in roles and custom YAML roles</li>
+        <li>Multi-agent orchestration with nine built-in roles and custom YAML roles</li>
+        <li>Quick, single, and multi orchestration modes</li>
+        <li>Mandatory command audit logging for all workspace and shell actions</li>
         <li>Task-type based LLM routing (coding, SQL, research, documentation, …)</li>
         <li>Persistent chat history in SQLite</li>
         <li>Real-time streaming via WebSocket during agent execution</li>
@@ -279,7 +285,12 @@
           <tr><td>Main app</td><td><code>agentforge/main.py</code></td><td>FastAPI app, CORS, lifespan hooks</td></tr>
           <tr><td>Routes</td><td><code>agentforge/api/routes.py</code></td><td>REST + WebSocket endpoints</td></tr>
           <tr><td>Config</td><td><code>agentforge/config.py</code></td><td>Pydantic settings from <code>.env</code></td></tr>
-          <tr><td>Orchestrator</td><td><code>agentforge/agents/orchestrator.py</code></td><td>Single/multi-agent loops, tool rounds</td></tr>
+          <tr><td>Orchestrator</td><td><code>agentforge/agents/orchestrator.py</code></td><td>Quick/single/multi loops, tool rounds</td></tr>
+          <tr><td>Workspace intent</td><td><code>agentforge/agents/workspace_intent.py</code></td><td>Detect read/write/list/shell intents</td></tr>
+          <tr><td>Task board</td><td><code>agentforge/agents/task_state.py</code></td><td>Shared facts, completion checks</td></tr>
+          <tr><td>Command audit</td><td><code>agentforge/services/command_audit.py</code></td><td>Mandatory logging of all commands</td></tr>
+          <tr><td>Workspace scanner</td><td><code>agentforge/agents/workspace_scanner.py</code></td><td>Directory scan with audit</td></tr>
+          <tr><td>Workspace executor</td><td><code>agentforge/agents/workspace_executor.py</code></td><td>Prefetch file contents</td></tr>
           <tr><td>Role registry</td><td><code>agentforge/agents/role_registry.py</code></td><td>Built-in + YAML custom roles</td></tr>
           <tr><td>Approval manager</td><td><code>agentforge/agents/approval_manager.py</code></td><td>Pending shell command approvals</td></tr>
           <tr><td>Tool registry</td><td><code>agentforge/tools/registry.py</code></td><td>File, directory, shell, memory tools</td></tr>
@@ -309,14 +320,89 @@
       <h3>4.2 Real-time streaming (WebSocket)</h3>
       <ol>
         <li>Frontend connects to <code>WS /api/ws/chats/{id}</code></li>
-        <li>User message sent as JSON over the socket</li>
-        <li>Server streams agent progress events (tool calls, inter-agent messages)</li>
-        <li>On completion, a <code>done</code> event is sent; on failure, an <code>error</code> event</li>
+        <li>User message sent as JSON (<code>type: "message"</code>, <code>content</code>, <code>mode</code>, <code>role_ids</code>)</li>
+        <li><code>AgentOrchestrator.run()</code> detects workspace intent, prefetches/scans with command audit</li>
+        <li>Server streams events: <code>agent_start</code>, <code>tool_call</code>, <code>shell_command_recorded</code>, <code>agent_message</code>, …</li>
+        <li>On completion, a <code>complete</code> event with <code>result</code> is sent; on failure, <code>error</code>; on cancel, <code>stopped</code></li>
       </ol>
+      <div class="note">
+        Full internal flow is documented in <a href="TECHNICAL_DOCUMENTATION.md">TECHNICAL_DOCUMENTATION.md</a> (German, source of truth).
+      </div>
+    </section>
+
+    <section id="orchestrator-internals">
+      <h2>5. Orchestrator Internals (<code>AgentOrchestrator.run</code>)</h2>
+      <p>Entry point: <code>backend/agentforge/agents/orchestrator.py</code></p>
+      <table>
+        <thead><tr><th>Phase</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Load chat, build tools, optionally store user message</td></tr>
+          <tr><td>2</td><td><code>run_readiness_check()</code> — abort if models not ready</td></tr>
+          <tr><td>3</td><td><code>detect_workspace_intent()</code> → <code>WorkspaceIntent</code></td></tr>
+          <tr><td>4</td><td><code>build_task_state()</code> + load prior task board from memory</td></tr>
+          <tr><td>5</td><td>Inside <code>command_audit_scope</code>: prefetch reads or scan directories</td></tr>
+          <tr><td>6</td><td>Context plugins (ambient) <strong>disabled</strong> when <code>requires_tools</code></td></tr>
+          <tr><td>7</td><td>Dispatch: <code>_run_quick</code> / <code>_run_single</code> / <code>_run_multi</code></td></tr>
+          <tr><td>8</td><td><code>persist_task_board()</code> and return <code>OrchestrationResponse</code></td></tr>
+        </tbody>
+      </table>
+      <h3>Execution strategy (multi-agent)</h3>
+      <table>
+        <thead><tr><th>Enum</th><th>Resolved behaviour</th></tr></thead>
+        <tbody>
+          <tr><td><code>auto</code></td><td>→ <code>hybrid</code></td></tr>
+          <tr><td><code>parallel</code></td><td>→ <code>hybrid</code></td></tr>
+          <tr><td><code>hybrid</code></td><td>Reviewer/security/tester roles may run in parallel batches</td></tr>
+          <tr><td><code>serial</code></td><td>Forced for single and quick modes</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="workspace-intent">
+      <h2>6. Workspace Intent Detection</h2>
+      <p>Module: <code>agentforge/agents/workspace_intent.py</code></p>
+      <p>Parses user text <strong>before</strong> LLM calls to detect disk actions:</p>
+      <ul>
+        <li><code>wants_file_read</code> — show file content in chat</li>
+        <li><code>wants_list_directory</code> — list folder (takes priority over read/write keywords)</li>
+        <li><code>wants_file_creation</code> / <code>wants_directory_creation</code></li>
+        <li><code>wants_command_execution</code> — shell</li>
+      </ul>
+      <p><code>build_prompt_addon()</code> injects strict tool instructions into the system prompt.</p>
+    </section>
+
+    <section id="task-board">
+      <h2>7. Task Board (Shared State)</h2>
+      <p>Module: <code>agentforge/agents/task_state.py</code></p>
+      <p>Blackboard shared across agents within one orchestration run:</p>
+      <ul>
+        <li><strong>TaskType</strong>: <code>read_and_display</code>, <code>write_files</code>, <code>list_directory</code>, <code>run_command</code>, <code>general</code></li>
+        <li><strong>TaskFact</strong>: verified info (reads, writes, listings) with source, path, agent, round</li>
+        <li>Persisted under memory key <code>_agentforge_task_board</code> between turns</li>
+        <li>Completion checks before final synthesis; weak retries (max 2) for incomplete answers</li>
+      </ul>
+    </section>
+
+    <section id="command-audit">
+      <h2>8. Command Audit (Mandatory Logging)</h2>
+      <p>Module: <code>agentforge/services/command_audit.py</code></p>
+      <div class="warn">
+        Every workspace and shell action must be logged. Direct <code>run_shell_command()</code> calls are allowed only in <code>command_audit.py</code> and <code>shell_security.py</code> (enforced by tests).
+      </div>
+      <table>
+        <thead><tr><th>Function</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td><code>record_read_file</code></td><td><code>read_file</code> tool, prefetch</td></tr>
+          <tr><td><code>record_list_directory</code></td><td><code>list_directory</code>, workspace scanner</td></tr>
+          <tr><td><code>execute_approved_shell_command</code></td><td>Approved shell execution</td></tr>
+          <tr><td><code>record_command</code></td><td>General shell audit entries</td></tr>
+        </tbody>
+      </table>
+      <p>Uses <code>command_audit_scope</code> (ContextVar) so nested calls inherit chat/agent context. WebSocket events: <code>shell_command_recorded</code>, <code>shell_command_pending</code>.</p>
     </section>
 
     <section id="installation">
-      <h2>5. Installation from GitHub</h2>
+      <h2>9. Installation from GitHub</h2>
       <pre><code>git clone https://github.com/YOUR_USERNAME/AgentForge.git
 cd AgentForge
 python3 install.py          # venv + pip + npm
@@ -483,19 +569,29 @@ python3 run.py</code></pre>
 
       <h3>8.1 Client → server</h3>
       <pre><code>{
-  "content": "Refactor the login module",
-  "mode": "coding",
+  "type": "message",
+  "content": "List files in src/",
+  "mode": "multi",
   "role_ids": ["developer", "reviewer"]
 }</code></pre>
+      <p>Also: <code>type: "stop"</code> (cancel), <code>type: "intervention"</code> (live input during run).</p>
 
       <h3>8.2 Server → client events</h3>
       <table>
         <thead><tr><th>type</th><th>Description</th></tr></thead>
         <tbody>
-          <tr><td><code>agent_message</code></td><td>Inter-agent or tool progress message</td></tr>
-          <tr><td><code>approval_required</code></td><td>Shell command needs user approval</td></tr>
-          <tr><td><code>message</code></td><td>Final assistant response</td></tr>
-          <tr><td><code>done</code></td><td>Processing complete</td></tr>
+          <tr><td><code>agent_start</code> / <code>agent_end</code></td><td>Agent turn lifecycle</td></tr>
+          <tr><td><code>agent_message</code></td><td>Multi-agent discussion message</td></tr>
+          <tr><td><code>role_resolved</code></td><td>Auto role selection (single mode)</td></tr>
+          <tr><td><code>model_selected</code></td><td>Chosen LLM model</td></tr>
+          <tr><td><code>content_delta</code></td><td>Streaming text chunk</td></tr>
+          <tr><td><code>tool_call</code> / <code>tool_result</code></td><td>Tool execution</td></tr>
+          <tr><td><code>shell_command_recorded</code></td><td>Command audit entry (Console Commands)</td></tr>
+          <tr><td><code>shell_command_pending</code></td><td>Shell command needs approval</td></tr>
+          <tr><td><code>context_plugin_start</code> / <code>context_plugin_complete</code></td><td>Ambient context plugins</td></tr>
+          <tr><td><code>user_intervention</code> / <code>user_message</code></td><td>Live user input</td></tr>
+          <tr><td><code>complete</code></td><td>Processing complete (<code>result</code> payload)</td></tr>
+          <tr><td><code>stopped</code></td><td>Cancelled by user</td></tr>
           <tr><td><code>error</code></td><td>Error with message text</td></tr>
         </tbody>
       </table>
@@ -508,13 +604,14 @@ python3 run.py</code></pre>
       <table>
         <thead><tr><th>Mode</th><th>Enum</th><th>Behaviour</th></tr></thead>
         <tbody>
-          <tr><td>Coding</td><td><code>coding</code></td><td>Single developer agent with full tool access</td></tr>
-          <tr><td>Multi-agent</td><td><code>multi_agent</code></td><td>Selected roles discuss in rounds; PM synthesizes</td></tr>
+          <tr><td>Quick</td><td><code>quick</code></td><td>Fast answer without full tool loop</td></tr>
+          <tr><td>Single</td><td><code>single</code></td><td>One role with tool access (auto-resolve or selected)</td></tr>
+          <tr><td>Multi</td><td><code>multi</code></td><td>Selected roles discuss in rounds; PM synthesizes; task board</td></tr>
         </tbody>
       </table>
 
-      <h3>9.2 Built-in roles</h3>
-      <p>Defined in <code>agentforge/agents/role_registry.py</code>: developer, reviewer, architect, researcher, documentation, project_manager.</p>
+      <h3>9.2 Built-in roles (9)</h3>
+      <p>Defined in <code>agentforge/agents/role_registry.py</code>: developer, reviewer, architect, researcher, documentation, project_manager, software_tester, security, devops.</p>
 
       <h3>9.3 Custom roles</h3>
       <p>YAML files in <code>assets/roles/</code> are loaded at startup:</p>
@@ -541,7 +638,7 @@ is_builtin: false</code></pre>
           <tr><td>ReadFileTool</td><td><code>read_file</code></td><td>Read text file within workspace (truncated at max_output_chars)</td></tr>
           <tr><td>WriteFileTool</td><td><code>write_file</code></td><td>Create or overwrite text file</td></tr>
           <tr><td>ListDirectoryTool</td><td><code>list_directory</code></td><td>List directory contents</td></tr>
-          <tr><td>ShellTool</td><td><code>run_shell</code></td><td>Execute shell command with whitelist/blacklist/approval</td></tr>
+          <tr><td>ShellTool</td><td><code>run_command</code></td><td>Execute shell command with whitelist/blacklist/approval (via command audit)</td></tr>
           <tr><td>RememberTool</td><td><code>remember</code></td><td>Store fact in chat or global memory</td></tr>
         </tbody>
       </table>
@@ -662,7 +759,8 @@ is_builtin: false</code></pre>
           <tr><td>API client</td><td><code>src/services/api.ts</code></td><td>REST wrapper</td></tr>
           <tr><td>i18n</td><td><code>src/i18n/locales/{en,de}.json</code></td><td>UI translations</td></tr>
           <tr><td>Memory</td><td><code>src/constants/memory.ts</code></td><td>Token budget options</td></tr>
-          <tr><td>ESC hook</td><td><code>src/hooks/useEscapeClose.ts</code></td><td>Close modals without saving</td></tr>
+          <tr><td>Command history</td><td><code>src/components/CommandHistoryModal.tsx</code></td><td>Console Commands from audit log</td></tr>
+          <tr><td>Context plugins</td><td><code>src/components/ContextPluginLog.tsx</code></td><td>Ambient plugin events</td></tr>
         </tbody>
       </table>
 
@@ -694,7 +792,10 @@ is_builtin: false</code></pre>
 
     <section id="testing">
       <h2>17. Testing</h2>
-      <pre><code># Unit tests (mocked LLM, no Ollama required)
+      <pre><code># Quality + audit tests (recommended after backend changes)
+./scripts/run-quality-tests.sh
+
+# Unit tests (mocked LLM, no Ollama required)
 python3 run_tests.py
 
 # Include live Ollama integration tests
@@ -704,14 +805,17 @@ python3 run_tests.py --live</code></pre>
       <table>
         <thead><tr><th>Test module</th><th>Coverage</th></tr></thead>
         <tbody>
+          <tr><td><code>test_command_audit_mandatory.py</code></td><td>Mandatory audit for ls, read, list, shell routing</td></tr>
+          <tr><td><code>test_prompt_intent_matrix.py</code></td><td>Workspace intent detection (parametrized)</td></tr>
+          <tr><td><code>test_prompt_orchestration_outcomes.py</code></td><td>E2E orchestration with mocked LLM</td></tr>
+          <tr><td><code>test_prompt_task_board_outcomes.py</code></td><td>Task board unit tests</td></tr>
           <tr><td><code>test_api.py</code></td><td>REST endpoints</td></tr>
           <tr><td><code>test_orchestrator.py</code></td><td>Agent loops, tool bailouts</td></tr>
-          <tr><td><code>test_cloud_providers.py</code></td><td>Cloud provider wiring</td></tr>
-          <tr><td><code>test_model_router.py</code></td><td>Task-type routing</td></tr>
           <tr><td><code>test_tools.py</code></td><td>File and shell tools</td></tr>
           <tr><td><code>test_live_ollama.py</code></td><td>Live Ollama inference (optional)</td></tr>
         </tbody>
       </table>
+      <p>CI: <code>.github/workflows/quality-tests.yml</code> runs on backend changes. Pytest markers: <code>audit</code>, <code>quality</code>.</p>
     </section>
 
     <section id="file-structure">

@@ -42,7 +42,7 @@ async def test_exchange_rates_plugin(monkeypatch, english_locale) -> None:
 def test_detect_required_plugins_empty_for_generic_prompt() -> None:
     """Generic prompts do not require any plugins."""
     assert detect_required_plugins("Erstelle mir eine Python-Datei") == []
-    assert detect_required_plugins("Schreibe Hallo Welt in eine Datei") == []
+    assert detect_required_plugins('Write "Hello World" to a file') == []
 
 
 def test_detect_required_plugins_datetime_on_schedule_words() -> None:
@@ -55,6 +55,23 @@ def test_detect_required_plugins_weather_intent() -> None:
     """Weather prompts require the weather plugin."""
     required = detect_required_plugins("Wie ist das Wetter in Berlin?")
     assert required == ["weather"]
+
+
+def test_detect_required_plugins_ignores_hier_in_read_request() -> None:
+    """Standalone 'hier' in file-read prompts must not trigger weather."""
+    prompt = (
+        "lese den dateiinhalt von /home/joruf/Dokumente/GitHub/Test12/test.txt "
+        "und liste mir den inhalt hier auf"
+    )
+    assert detect_required_plugins(prompt) == []
+
+
+def test_detect_required_plugins_skips_for_workspace_tasks() -> None:
+    """Workspace tasks suppress ambient plugins entirely."""
+    assert detect_required_plugins(
+        "Wie ist das Wetter heute?",
+        workspace_task_active=True,
+    ) == []
 
 
 @pytest.mark.asyncio
@@ -87,7 +104,7 @@ async def test_registry_message_loads_detected_plugins_only(monkeypatch, english
 
     monkeypatch.setattr(WeatherContextPlugin, "resolve", fake_weather)
 
-    generic = await registry.build_for_message("Schreibe Hallo Welt in eine Datei")
+    generic = await registry.build_for_message('Write "Hello World" to a file')
     assert generic == ""
 
     weather = await registry.build_for_message("Wie ist das Wetter heute?")

@@ -43,6 +43,7 @@
     "singleAgentTooltip": "One agent with roles, tools, and workspace access — ideal for coding, debugging, and focused development work.",
     "multiAgentTooltip": "Several agents discuss your request together — ideal for planning, reviews, architecture, and complex decisions.",
     "deleteChat": "Delete chat",
+    "chatList": "Chats",
     "renameChat": "Edit chat title",
     "renameChatHint": "Double-click to edit",
     "chatRunning": "Agents are working…",

@@ -83,6 +83,132 @@ def build_deliverable_status_summary(user_content: str, intent: WorkspaceIntent)
     )
 
 
+def resolve_read_file_paths(user_content: str, intent: WorkspaceIntent) -> list[str]:
+    """
+    Resolve workspace-relative file paths for read requests.
+
+    :param user_content: Original user request
+    :param intent: Parsed workspace intent
+    :return: Deduplicated workspace-relative file paths
+    """
+    paths: list[str] = []
+    seen: set[str] = set()
+
+    for relative in intent.target_paths:
+        if Path(relative).suffix and relative not in seen:
+            seen.add(relative)
+            paths.append(relative)
+
+    if paths:
+        return paths
+
+    inferred = infer_requested_files(user_content, intent)
+    for relative in inferred:
+        if relative not in seen:
+            seen.add(relative)
+            paths.append(relative)
+    return paths
+
+
+def read_workspace_file(relative_path: str) -> tuple[bool, str]:
+    """
+    Read one workspace file and return its text content.
+
+    :param relative_path: Workspace-relative file path
+    :return: Tuple of success flag and content or error message
+    """
+    try:
+        absolute = _resolve_path(relative_path)
+        if not absolute.is_file():
+            return False, f"File not found: {absolute}"
+        content = absolute.read_text(encoding="utf-8", errors="replace")
+        if len(content) > settings.max_output_chars:
+            content = content[: settings.max_output_chars] + "\n... [truncated]"
+        return True, content
+    except (OSError, PermissionError, UnicodeError) as exc:
+        return False, str(exc)
+
+
+async def prefetch_read_file_contents(
+    user_content: str,
+    intent: WorkspaceIntent,
+) -> dict[str, str]:
+    """
+    Pre-read target files for a read request.
+
+    :param user_content: Original user request
+    :param intent: Parsed workspace intent
+    :return: Mapping of workspace-relative path to content or error text
+    """
+    from agentforge.services.command_audit import record_read_file
+
+    contents: dict[str, str] = {}
+    for relative_path in resolve_read_file_paths(user_content, intent):
+        success, payload = read_workspace_file(relative_path)
+        await record_read_file(
+            relative_path,
+            output=payload,
+            success=success,
+        )
+        if success:
+            contents[relative_path] = payload
+        else:
+            contents[relative_path] = f"[ERROR] {payload}"
+    return contents
+
+
+def build_read_context_block(contents: dict[str, str]) -> str:
+    """
+    Build verified file-content context for agent prompts.
+
+    :param contents: Mapping of path to file content or error text
+    :return: Prompt context block or empty string
+    """
+    if not contents:
+        return ""
+
+    lines = [
+        "Verified file content from disk (use this in your response; do not invent text):",
+    ]
+    for relative_path, payload in contents.items():
+        lines.append(f"\nFile `{relative_path}`:")
+        if payload.startswith("[ERROR]"):
+            lines.append(payload)
+        else:
+            lines.append("```")
+            lines.append(payload)
+            lines.append("```")
+    return "\n".join(lines)
+
+
+def build_read_task_summary(
+    user_content: str,
+    intent: WorkspaceIntent,
+    prefetched: dict[str, str] | None = None,
+) -> str:
+    """
+    Build the final user-facing response for read-file requests.
+
+    :param user_content: Original user request
+    :param intent: Parsed workspace intent
+    :param prefetched: Pre-read path-to-content mapping
+    :return: Human-readable file listing or empty string
+    """
+    contents = prefetched or {}
+    if not contents:
+        return ""
+
+    blocks: list[str] = []
+    for relative_path, payload in contents.items():
+        if payload.startswith("[ERROR]"):
+            blocks.append(f"**{relative_path}**\n{payload}")
+            continue
+        blocks.append(
+            f"Datei `{relative_path}`:\n\n```\n{payload}\n```"
+        )
+    return "\n\n".join(blocks)
+
+
 def _base_directory(intent: WorkspaceIntent) -> str | None:
     """
     Resolve the target directory for planned deliverables.
@@ -145,6 +271,9 @@ def plan_deliverable_files(user_content: str, intent: WorkspaceIntent) -> list[s
     :param intent: Parsed workspace intent
     :return: Workspace-relative deliverable paths
     """
+    if intent.wants_file_read and not intent.wants_file_creation:
+        return []
+
     explicit = infer_requested_files(user_content, intent)
     if explicit:
         return explicit

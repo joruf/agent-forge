@@ -18,11 +18,11 @@ async def test_write_and_read_file(temp_workspace) -> None:
     """Write and read tools operate within workspace."""
     write_tool = WriteFileTool()
     read_tool = ReadFileTool()
-    write_result = await write_tool.execute({"path": "test.txt", "content": "hello"})
+    write_result = await write_tool.execute({"path": "test.txt", "content": "Hello World"})
     assert write_result.success is True
     read_result = await read_tool.execute({"path": "test.txt"})
     assert read_result.success is True
-    assert "hello" in read_result.output
+    assert "Hello World" in read_result.output
 
 
 @pytest.mark.asyncio

@@ -12,10 +12,12 @@ secrets.json
 
 # --- Python virtual environments ---
 .venv/
+.venv-test/
 venv/
 env/
 ENV/
 backend/.venv/
+backend/.venv-test/
 backend/venv/
 
 # --- Python bytecode and caches ---

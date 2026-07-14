@@ -133,7 +133,7 @@ def test_apply_file_edit_by_line_range(temp_workspace) -> None:
 
     message, count = apply_file_edit(
         target,
-        new_text="hello",
+        new_text="Hello World",
         start_line=1,
         start_column=15,
         end_line=1,
@@ -141,7 +141,7 @@ def test_apply_file_edit_by_line_range(temp_workspace) -> None:
     )
 
     assert count == 1
-    assert "hello" in target.read_text(encoding="utf-8")
+    assert "Hello World" in target.read_text(encoding="utf-8")
     assert "Updated" in message
 
 

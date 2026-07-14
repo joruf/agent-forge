@@ -2,12 +2,15 @@
 
 from pathlib import Path
 
+import pytest
+
 from agentforge.agents.workspace_intent import detect_workspace_intent
 from agentforge.agents.workspace_scanner import build_workspace_path_context
 from agentforge.config import settings
 
 
-def test_build_workspace_path_context_for_missing_directory(
+@pytest.mark.asyncio
+async def test_build_workspace_path_context_for_missing_directory(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -15,12 +18,13 @@ def test_build_workspace_path_context_for_missing_directory(
     monkeypatch.setattr(settings, "workspace_root", tmp_path)
     prompt = f"Erstelle index.php und speichere unter {tmp_path}/GitHub/NewProject"
     intent = detect_workspace_intent(prompt)
-    context = build_workspace_path_context(intent)
+    context = await build_workspace_path_context(intent)
     assert "GitHub/NewProject" in context
     assert "does not exist yet" in context
 
 
-def test_build_workspace_path_context_lists_existing_files(
+@pytest.mark.asyncio
+async def test_build_workspace_path_context_lists_existing_files(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -34,7 +38,7 @@ def test_build_workspace_path_context_lists_existing_files(
     monkeypatch.setattr(settings, "workspace_root", tmp_path)
     prompt = f"Erweitere das Projekt unter {tmp_path}/GitHub/Existing"
     intent = detect_workspace_intent(prompt)
-    context = build_workspace_path_context(intent)
+    context = await build_workspace_path_context(intent)
     assert "GitHub/Existing" in context
     assert "[FILE] README.md" in context
     assert "[FILE] index.php" in context

@@ -254,6 +254,57 @@ async def record_write_file(
     )
 
 
+async def record_read_file(
+    relative_path: str,
+    *,
+    output: str,
+    success: bool,
+) -> None:
+    """
+    Log workspace file reads in command history.
+
+    :param relative_path: Workspace-relative file path
+    :param output: Tool output text
+    :param success: Whether the read succeeded
+    """
+    parent = Path(relative_path).parent
+    await record_from_context(
+        command=f"read_file {relative_path}",
+        cwd=str(parent) if parent != Path(".") else ".",
+        status="success" if success else "failed",
+        success=success,
+        exit_code=0 if success else 1,
+        output=output,
+        source="workspace",
+    )
+
+
+async def record_list_directory(
+    relative_path: str,
+    *,
+    output: str,
+    success: bool,
+) -> None:
+    """
+    Log workspace directory listings in command history.
+
+    :param relative_path: Workspace-relative directory path
+    :param output: Tool output text
+    :param success: Whether the listing succeeded
+    """
+    normalized = relative_path or "."
+    command = "list_directory" if normalized == "." else f"list_directory {normalized}"
+    await record_from_context(
+        command=command,
+        cwd=normalized,
+        status="success" if success else "failed",
+        success=success,
+        exit_code=0 if success else 1,
+        output=output,
+        source="workspace",
+    )
+
+
 async def execute_shell_command(
     chat_id: str,
     *,
@@ -388,6 +439,86 @@ async def execute_shell_command(
         on_event=on_event,
     )
     return ToolCallResult(tool="run_command", success=success, output=formatted_output)
+
+
+async def execute_approved_shell_command(
+    chat_id: str,
+    *,
+    command: str,
+    cwd: str | None,
+    approval_id: str,
+    agent_id: str | None = None,
+    agent_name: str | None = None,
+    on_event: EventCallback | None = None,
+) -> MessageResponse:
+    """
+    Execute one user-approved shell command and persist the audit entry.
+
+    :param chat_id: Chat session ID
+    :param command: Shell command string
+    :param cwd: Optional workspace-relative working directory
+    :param approval_id: Approval identifier
+    :param agent_id: Agent role identifier
+    :param agent_name: Agent display name
+    :param on_event: Optional WebSocket callback
+    :return: Stored command audit message
+    """
+    classification = classify_shell_command(command)
+    if not classification.allowed:
+        return await record_command(
+            chat_id,
+            command=command,
+            cwd=cwd,
+            status="blocked",
+            success=False,
+            exit_code=None,
+            output=classification.reason,
+            agent_id=agent_id,
+            agent_name=agent_name,
+            approval_id=approval_id,
+            source="shell",
+            on_event=on_event,
+        )
+
+    workspace_cwd = settings.workspace_root
+    if cwd:
+        from agentforge.tools.registry import _resolve_path
+
+        workspace_cwd = _resolve_path(cwd)
+
+    try:
+        success, exit_code, formatted_output = await run_shell_command(command, workspace_cwd)
+    except Exception as exc:
+        return await record_command(
+            chat_id,
+            command=command,
+            cwd=cwd,
+            status="failed",
+            success=False,
+            exit_code=None,
+            output=str(exc),
+            agent_id=agent_id,
+            agent_name=agent_name,
+            approval_id=approval_id,
+            source="shell",
+            on_event=on_event,
+        )
+
+    status, parsed_exit = shell_status_from_output(formatted_output, success=success)
+    return await record_command(
+        chat_id,
+        command=command,
+        cwd=cwd,
+        status=status,
+        success=success,
+        exit_code=parsed_exit if parsed_exit is not None else exit_code,
+        output=formatted_output,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        approval_id=approval_id,
+        source="shell",
+        on_event=on_event,
+    )
 
 
 @asynccontextmanager

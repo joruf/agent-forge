@@ -11,15 +11,37 @@ from typing import Any, Callable, Awaitable
 from agentforge.agents.approval_manager import approval_manager
 from agentforge.agents.role_registry import role_registry
 from agentforge.agents.role_router import AUTO_ROLE, resolve_single_role
+from agentforge.agents.task_state import (
+    TaskState,
+    build_escalation_message,
+    build_final_response_from_task_state,
+    build_pm_verification_block,
+    build_task_state,
+    check_completion,
+    format_role_output_schema,
+    format_task_board_block,
+    format_task_plan_block,
+    increment_weak_retry,
+    load_task_board_memory,
+    persist_task_board,
+    record_tool_result_as_fact,
+    seed_read_facts,
+    seed_write_facts,
+    seed_list_directory_facts,
+    MAX_WEAK_RETRIES,
+)
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.agents.workspace_executor import (
     build_deliverable_status_summary,
     build_implementation_prompt,
     build_materialization_prompt,
+    build_read_context_block,
+    build_read_task_summary,
     fallback_file_content,
     file_exists_in_workspace,
     missing_requested_files,
     plan_deliverable_files,
+    prefetch_read_file_contents,
     prepare_deliverable_content,
     strip_code_fences,
     write_file_direct,
@@ -64,11 +86,11 @@ from agentforge.services.command_audit import (
     CommandAuditContext,
     audit_context,
     command_audit_scope,
+    execute_approved_shell_command,
     execute_shell_command,
     record_command,
     serialize_shell_command_entry,
 )
-from agentforge.tools.shell_security import classify_shell_command, run_shell_command
 
 
 def _effective_chat_memory(memory: ChatMemorySettings) -> ChatMemorySettings:
@@ -167,6 +189,10 @@ class AgentOrchestrator:
         """
         if role_id == "project_manager":
             return ToolRegistry()
+        if workspace_intent.wants_file_read and not workspace_intent.wants_file_creation:
+            if role_id in self.READ_EXECUTE_TOOL_ROLES or role_id == "developer":
+                return self._build_read_execute_tools(chat_id, memory_scope)
+            return ToolRegistry()
         if role_id == "reviewer":
             return ToolRegistry()
         if role_id == "developer":
@@ -193,8 +219,14 @@ class AgentOrchestrator:
         """
         if mode_multi:
             if role_id == "developer":
-                if workspace_intent and workspace_intent.wants_file_creation:
-                    return self.max_tool_rounds
+                if workspace_intent and (
+                    workspace_intent.wants_file_creation
+                    or workspace_intent.wants_file_read
+                ):
+                    return self.max_tool_rounds if workspace_intent.wants_file_creation else min(
+                        self.max_tool_rounds,
+                        6,
+                    )
                 return min(self.max_tool_rounds, 6)
             return 1
         if workspace_intent and workspace_intent.wants_file_creation:
@@ -256,7 +288,9 @@ class AgentOrchestrator:
         """
         if effective_strategy != ExecutionStrategy.HYBRID:
             return False
-        if workspace_intent and workspace_intent.wants_file_creation:
+        if workspace_intent and (
+            workspace_intent.wants_file_creation or workspace_intent.wants_file_read
+        ):
             return False
         return round_num < max_rounds - 1
 
@@ -301,7 +335,7 @@ class AgentOrchestrator:
         :param intent: Parsed workspace intent
         :return: Reordered role list
         """
-        if not intent.wants_file_creation:
+        if not intent.wants_file_creation and not intent.wants_file_read:
             return roles
 
         priority = {
@@ -500,6 +534,16 @@ class AgentOrchestrator:
                     "content": content,
                 })
 
+    @staticmethod
+    def _merge_context_blocks(*parts: str) -> str:
+        """
+        Join optional prompt context blocks.
+
+        :param parts: Context fragments
+        :return: Combined context or empty string
+        """
+        return "\n\n".join(part.strip() for part in parts if part and part.strip())
+
     def _build_multi_prompt(
         self,
         role: AgentRole,
@@ -507,6 +551,7 @@ class AgentOrchestrator:
         user_content: str,
         transcript: list[str],
         workspace_intent: WorkspaceIntent | None = None,
+        task_state: TaskState | None = None,
     ) -> str:
         """
         Build the role-specific multi-agent prompt for one turn.
@@ -521,7 +566,25 @@ class AgentOrchestrator:
         intent = workspace_intent or detect_workspace_intent(user_content)
         max_rounds = self._resolve_multi_rounds()
         workspace_note = ""
-        if intent.wants_file_creation and role.id in self.FULL_TOOL_ROLES:
+        task_board_note = ""
+        if task_state:
+            task_board_note = "\n\n" + format_task_board_block(task_state)
+            if role.id == "project_manager" and round_num == 0:
+                task_board_note = "\n\n" + format_task_plan_block(task_state) + task_board_note
+        if intent.wants_file_read:
+            planned = intent.target_paths
+            workspace_note = (
+                "\n\nIMPORTANT: The user wants to READ existing file content and see it in chat. "
+                "Use read_file for each requested path and quote the content verbatim. "
+                "Do not write files or reply with JSON status placeholders."
+            )
+            if planned:
+                files_block = "\n".join(f"- {path}" for path in planned)
+                workspace_note += (
+                    "\nRequested workspace-relative file path(s):\n"
+                    f"{files_block}"
+                )
+        elif intent.wants_file_creation and role.id in self.FULL_TOOL_ROLES:
             planned = plan_deliverable_files(user_content, intent)
             workspace_note = (
                 "\n\nIMPORTANT: The user wants files saved on disk. "
@@ -542,7 +605,12 @@ class AgentOrchestrator:
 
         if role.id == "project_manager" and round_num < max_rounds - 1:
             pm_note = ""
-            if intent.wants_file_creation:
+            if intent.wants_file_read:
+                pm_note = (
+                    "\nThe user expects the actual file content in the final answer. "
+                    "Ensure the Developer uses read_file and quotes the content."
+                )
+            elif intent.wants_file_creation:
                 pm_note = (
                     "\nThe user expects real files in the workspace. "
                     "Ensure the Developer uses write_file — not chat output only."
@@ -556,7 +624,16 @@ class AgentOrchestrator:
             )
         if role.id == "project_manager":
             deliverable_note = ""
-            if intent.wants_file_creation:
+            if intent.wants_file_read:
+                paths = intent.target_paths
+                if paths:
+                    files_block = "\n".join(f"- {path}" for path in paths)
+                    deliverable_note = (
+                        "\nQuote the verified file content for the user:\n"
+                        f"{files_block}\n"
+                        "Do not invent content or claim success without showing the text."
+                    )
+            elif intent.wants_file_creation:
                 planned = plan_deliverable_files(user_content, intent)
                 if planned:
                     files_block = "\n".join(f"- {path}" for path in planned)
@@ -572,44 +649,70 @@ class AgentOrchestrator:
                 + (
                     " Mention which files were written to disk."
                     if intent.wants_file_creation
-                    else ""
+                    else (
+                        " Show the requested file content verbatim."
+                        if intent.wants_file_read
+                        else ""
+                    )
                 )
                 + deliverable_note
             )
 
-        role_note = self._role_multi_discussion_note(role.id)
+        role_note = self._role_multi_discussion_note(role.id, intent, task_state)
+        parallel_note = ""
+        if task_state and self._is_parallel_role(role.id):
+            parallel_note = (
+                "\n\nParallel specialist turn: rely on the shared task board facts "
+                "in the system prompt, not only the discussion transcript."
+            )
         return (
             f"User request: {user_content}\n\nDiscussion so far:\n"
             + "\n".join(transcript[-8:])
             + f"\n\nRespond as {role.name}. Be concise and actionable."
             + workspace_note
+            + task_board_note
             + role_note
+            + parallel_note
         )
 
     @staticmethod
-    def _role_multi_discussion_note(role_id: str) -> str:
+    def _role_multi_discussion_note(
+        role_id: str,
+        intent: WorkspaceIntent | None = None,
+        task_state: TaskState | None = None,
+    ) -> str:
         """
         Return role-specific instructions for multi-agent discussion turns.
 
         :param role_id: Agent role identifier
+        :param intent: Parsed workspace intent
+        :param task_state: Shared task board for the current run
         :return: Additional prompt guidance
         """
+        schema = ""
+        if task_state:
+            schema = format_role_output_schema(role_id, task_state.task_type)
         if role_id == "reviewer":
             return (
                 "\n\nReview the existing discussion only. Do not generate full HTML, "
                 "PHP, or complete implementations. Give brief, actionable feedback."
+                + schema
+            )
+        if role_id == "developer":
+            return (
+                "\n\nIf you use read_file, quote the file content for the team. "
+                "If you use write_file or run_command, summarize what you changed."
+                + schema
             )
         if role_id in {"software_tester", "security"}:
             return (
                 "\n\nAnalyze and report findings only. Do not replace the Developer "
                 "by outputting full implementations."
+                + schema
             )
-        if role_id == "developer":
-            return (
-                "\n\nIf you use write_file or run_command, summarize what you created "
-                "or changed in plain language for the team."
-            )
-        return ""
+        if role_id == "project_manager":
+            return schema
+        return schema
 
     async def _emit_agent_end(
         self,
@@ -650,6 +753,7 @@ class AgentOrchestrator:
         intervention_queue: asyncio.Queue[str] | None,
         workspace_intent: WorkspaceIntent | None = None,
         path_context: str = "",
+        task_state: TaskState | None = None,
     ) -> tuple[str, dict, AgentMessage]:
         """
         Execute one role turn in multi-agent mode.
@@ -674,9 +778,15 @@ class AgentOrchestrator:
             user_content,
             transcript,
             workspace_intent=intent,
+            task_state=task_state,
         )
-        tools_enabled = role.id in self.FULL_TOOL_ROLES and (
-            role.id == "developer" or intent.wants_file_creation
+        tools_enabled = (
+            (role.id in self.FULL_TOOL_ROLES and (
+                role.id == "developer"
+                or intent.wants_file_creation
+                or intent.wants_file_read
+            ))
+            or (intent.wants_file_read and role.id in self.READ_EXECUTE_TOOL_ROLES)
         )
         system = self._build_system_prompt(
             role,
@@ -684,6 +794,7 @@ class AgentOrchestrator:
             tools_enabled=tools_enabled,
             workspace_intent=intent,
             path_context=path_context,
+            task_state=task_state,
         )
         agent_tools = self._tools_for_multi_role(
             role.id,
@@ -717,8 +828,28 @@ class AgentOrchestrator:
             role_id=role.id,
             intervention_queue=intervention_queue,
             workspace_intent=intent,
+            task_state=task_state,
+            round_num=round_num,
             mode_multi=True,
         )
+        if (
+            task_state
+            and intent.requires_tools
+            and self._is_weak_discussion_content(content)
+            and role.id != "project_manager"
+            and not check_completion(task_state).complete
+        ):
+            retries = increment_weak_retry(task_state, role.id)
+            if retries >= MAX_WEAK_RETRIES:
+                completion = check_completion(task_state)
+                content = (
+                    "[ASK_USER] "
+                    + build_escalation_message(
+                        task_state,
+                        role.id,
+                        reason=completion.reason,
+                    )
+                )
         await self._emit_agent_end(
             on_event,
             role.id,
@@ -837,6 +968,31 @@ class AgentOrchestrator:
             return summary
         return "Created files on disk:\n- " + "\n- ".join(created)
 
+    def _seed_created_write_facts(
+        self,
+        task_state: TaskState | None,
+        user_content: str,
+        intent: WorkspaceIntent,
+        *,
+        agent_id: str = "developer",
+        round_num: int = 0,
+    ) -> None:
+        """
+        Record verified write facts for deliverables that exist on disk.
+
+        :param task_state: Active task board or None
+        :param user_content: Original user request
+        :param intent: Parsed workspace intent
+        :param agent_id: Agent role identifier
+        :param round_num: Orchestration round index
+        """
+        if task_state is None or not intent.wants_file_creation:
+            return
+        planned = plan_deliverable_files(user_content, intent)
+        created = [path for path in planned if file_exists_in_workspace(path)]
+        if created:
+            seed_write_facts(task_state, created, agent_id=agent_id, round_num=round_num)
+
     async def _ensure_requested_files(
         self,
         chat_id: str,
@@ -847,6 +1003,7 @@ class AgentOrchestrator:
         memory_scope: str,
         on_event: Callable | None,
         intervention_queue: asyncio.Queue[str] | None,
+        task_state: TaskState | None = None,
     ) -> tuple[str | None, AgentMessage | None]:
         """
         Run a dedicated developer implementation pass for explicit file requests.
@@ -859,8 +1016,12 @@ class AgentOrchestrator:
         :param memory_scope: Memory scope label
         :param on_event: Optional WebSocket event callback
         :param intervention_queue: Optional live user input queue
+        :param task_state: Shared task board for verified write facts
         :return: Tuple of implementation summary and discussion message
         """
+        if not intent.wants_file_creation:
+            return None, None
+
         planned = plan_deliverable_files(user_content, intent)
         if not planned:
             return None, None
@@ -891,6 +1052,14 @@ class AgentOrchestrator:
         await self._emit_agent_end(on_event, developer.id, developer.name, round_num=0)
         if not content:
             return None, None
+
+        self._seed_created_write_facts(
+            task_state,
+            user_content,
+            intent,
+            agent_id=developer.id,
+            round_num=0,
+        )
 
         discussion = AgentMessage(
             from_agent=developer.name,
@@ -992,19 +1161,45 @@ class AgentOrchestrator:
             )
 
         workspace_intent = detect_workspace_intent(user_content)
-        path_context = build_workspace_path_context(workspace_intent)
+        prior_board = await load_task_board_memory(chat_id)
+        task_state = build_task_state(user_content, workspace_intent, prior_board)
+        prefetched_reads: dict[str, str] = {}
+        async with command_audit_scope(chat_id, "system", "System", on_event):
+            if workspace_intent.wants_file_read:
+                prefetched_reads = await prefetch_read_file_contents(
+                    user_content,
+                    workspace_intent,
+                )
+                seed_read_facts(task_state, prefetched_reads)
+                path_context = build_read_context_block(prefetched_reads)
+            else:
+                path_context = await build_workspace_path_context(workspace_intent)
+                if workspace_intent.wants_list_directory and path_context:
+                    listing_targets = list(
+                        workspace_intent.target_dirs or workspace_intent.target_paths
+                    )
+                    if listing_targets:
+                        seed_list_directory_facts(
+                            task_state,
+                            listing_targets[0],
+                            path_context,
+                        )
         process_context = path_context
         if workspace_intent.requires_tools:
             process_context = "\n".join(
                 part for part in (path_context, workspace_intent.build_prompt_addon()) if part
             )
-        self._ambient_context = await context_registry.build_for_message(
-            user_content,
-            chat_id,
-            on_event=on_event,
-            process_context=process_context,
-            client_ip=client_ip,
-        )
+        if workspace_intent.requires_tools:
+            self._ambient_context = ""
+        else:
+            self._ambient_context = await context_registry.build_for_message(
+                user_content,
+                chat_id,
+                on_event=on_event,
+                process_context=process_context,
+                client_ip=client_ip,
+                workspace_task_active=workspace_intent.requires_tools,
+            )
 
         if mode == OrchestrationMode.MULTI:
             result = await self._run_multi(
@@ -1019,6 +1214,8 @@ class AgentOrchestrator:
                 intervention_queue,
                 workspace_intent=workspace_intent,
                 path_context=path_context,
+                task_state=task_state,
+                prefetched_reads=prefetched_reads,
             )
         elif mode == OrchestrationMode.QUICK:
             result = await self._run_quick(
@@ -1044,6 +1241,8 @@ class AgentOrchestrator:
                 intervention_queue,
                 workspace_intent=workspace_intent,
                 path_context=path_context,
+                task_state=task_state,
+                prefetched_reads=prefetched_reads,
             )
             if result.resolved_role_id:
                 await conversation_store.update_chat(
@@ -1051,6 +1250,7 @@ class AgentOrchestrator:
                     ChatUpdate(role_ids=[result.resolved_role_id]),
                 )
 
+        await persist_task_board(chat_id, task_state)
         return result
 
     async def _run_single(
@@ -1066,9 +1266,12 @@ class AgentOrchestrator:
         intervention_queue: asyncio.Queue[str] | None = None,
         workspace_intent: WorkspaceIntent | None = None,
         path_context: str = "",
+        task_state: TaskState | None = None,
+        prefetched_reads: dict[str, str] | None = None,
     ) -> OrchestrationResponse:
         """Single agent with a selected software-development role."""
         await self._ensure_not_cancelled()
+        prefetched_reads = prefetched_reads or {}
         role_id, used_auto = resolve_single_role(role_ids, user_content)
         if used_auto and on_event:
             await on_event({
@@ -1082,6 +1285,8 @@ class AgentOrchestrator:
             raise RuntimeError("Default developer role is not registered.")
         role_id = role.id
         workspace_intent = workspace_intent or detect_workspace_intent(user_content)
+        if task_state is None:
+            task_state = build_task_state(user_content, workspace_intent)
         needs_tools = self._prompt_needs_tools(user_content, role_id)
         agent_tools = (
             self._tools_for_role(role_id, chat_id, memory_scope, tools)
@@ -1094,6 +1299,7 @@ class AgentOrchestrator:
             tools_enabled=needs_tools,
             workspace_intent=workspace_intent,
             path_context=path_context,
+            task_state=task_state,
         )
         messages = [
             {"role": "system", "content": system},
@@ -1123,17 +1329,25 @@ class AgentOrchestrator:
             mode_single=True,
             intervention_queue=intervention_queue,
             workspace_intent=workspace_intent,
+            task_state=task_state,
         )
         await self._emit_agent_end(on_event, role_id, role.name, round_num=1)
 
         still_missing = missing_requested_files(user_content, workspace_intent)
-        if still_missing:
+        if still_missing and workspace_intent.wants_file_creation:
             fallback = await self._guarantee_workspace_deliverables(
                 chat_id,
                 user_content,
                 workspace_intent,
                 role_id=role_id,
                 on_event=on_event,
+            )
+            self._seed_created_write_facts(
+                task_state,
+                user_content,
+                workspace_intent,
+                agent_id=role_id,
+                round_num=1,
             )
             if fallback:
                 content = (
@@ -1141,7 +1355,7 @@ class AgentOrchestrator:
                     if self._is_weak_discussion_content(content)
                     else f"{content}\n\n{fallback}"
                 )
-        else:
+        elif workspace_intent.wants_file_creation:
             fallback = await self._guarantee_workspace_deliverables(
                 chat_id,
                 user_content,
@@ -1149,8 +1363,25 @@ class AgentOrchestrator:
                 role_id=role_id,
                 on_event=on_event,
             )
+            self._seed_created_write_facts(
+                task_state,
+                user_content,
+                workspace_intent,
+                agent_id=role_id,
+                round_num=1,
+            )
             if fallback and self._is_weak_discussion_content(content):
                 content = fallback
+        elif workspace_intent.wants_file_read:
+            read_summary = build_final_response_from_task_state(task_state)
+            if not read_summary:
+                read_summary = build_read_task_summary(
+                    user_content,
+                    workspace_intent,
+                    prefetched_reads,
+                )
+            if read_summary and self._is_weak_discussion_content(content):
+                content = read_summary
 
         await self._ensure_not_cancelled()
 
@@ -1262,10 +1493,14 @@ class AgentOrchestrator:
         intervention_queue: asyncio.Queue[str] | None = None,
         workspace_intent: WorkspaceIntent | None = None,
         path_context: str = "",
+        task_state: TaskState | None = None,
+        prefetched_reads: dict[str, str] | None = None,
     ) -> OrchestrationResponse:
         """Multi-agent discussion with project manager synthesis."""
         if not role_ids:
             role_ids = ["project_manager", "developer", "reviewer"]
+
+        prefetched_reads = prefetched_reads or {}
 
         roles = [role for role in role_registry.get_roles(role_ids) if role is not None]
         if not roles:
@@ -1283,8 +1518,11 @@ class AgentOrchestrator:
             roles = [pm] + roles
 
         workspace_intent = workspace_intent or detect_workspace_intent(user_content)
+        if task_state is None:
+            task_state = build_task_state(user_content, workspace_intent)
         roles = self._order_roles_for_intent(roles, workspace_intent)
         max_multi_rounds = self._resolve_multi_rounds()
+        transcript.append(f"Project Manager: Task plan:\n{format_task_plan_block(task_state)}")
 
         impl_content, impl_discussion = await self._ensure_requested_files(
             chat_id=chat_id,
@@ -1295,8 +1533,21 @@ class AgentOrchestrator:
             memory_scope=memory_scope,
             on_event=on_event,
             intervention_queue=intervention_queue,
+            task_state=task_state,
         )
         developer_impl_done = impl_discussion is not None
+        if prefetched_reads:
+            read_lines = [
+                "System: Verified file content loaded from disk:",
+            ]
+            for relative_path, payload in prefetched_reads.items():
+                if payload.startswith("[ERROR]"):
+                    read_lines.append(f"- {relative_path}: {payload}")
+                else:
+                    preview = payload.replace("\n", " ")[:120]
+                    read_lines.append(f"- {relative_path}: {preview}")
+            transcript.append("\n".join(read_lines))
+
         if impl_discussion and impl_content:
             discussions.append(impl_discussion)
             transcript.append(f"{impl_discussion.from_agent}: {impl_content}")
@@ -1350,6 +1601,7 @@ class AgentOrchestrator:
                             intervention_queue=None,
                             workspace_intent=workspace_intent,
                             path_context=path_context,
+                            task_state=task_state,
                         )
                         for batch_role in batch
                     ])
@@ -1389,6 +1641,7 @@ class AgentOrchestrator:
                     intervention_queue=intervention_queue,
                     workspace_intent=workspace_intent,
                     path_context=path_context,
+                    task_state=task_state,
                 )
                 discussions.append(discussion)
                 transcript.append(f"{role.name}: {content}")
@@ -1443,16 +1696,50 @@ class AgentOrchestrator:
             ))
             transcript.append(f"Developer: {guarantee}")
 
+        self._seed_created_write_facts(
+            task_state,
+            user_content,
+            workspace_intent,
+            agent_id="developer",
+            round_num=max_multi_rounds,
+        )
+
+        completion = check_completion(task_state)
+        verification = build_pm_verification_block(task_state, completion)
+        pm_name = final_role.name if final_role else "Project Manager"
+        verification_discussion = AgentMessage(
+            from_agent=pm_name,
+            to_agent="team",
+            content=verification,
+            timestamp=datetime.now(timezone.utc),
+        )
+        discussions.append(verification_discussion)
+        transcript.append(f"{pm_name}: {verification}")
+
         deliverable_summary = build_deliverable_status_summary(
             user_content,
             workspace_intent,
         )
-        if deliverable_summary and workspace_intent.wants_file_creation:
+        task_board_summary = build_final_response_from_task_state(task_state)
+        if task_board_summary:
+            final_content = task_board_summary
+        elif workspace_intent.wants_file_read:
+            read_summary = build_read_task_summary(
+                user_content,
+                workspace_intent,
+                prefetched_reads,
+            )
+            final_content = read_summary or deliverable_summary or (
+                transcript[-1].split(": ", 1)[-1] if transcript else "No result"
+            )
+        elif deliverable_summary and workspace_intent.wants_file_creation:
             final_content = deliverable_summary
         else:
             final_content = transcript[-1].split(": ", 1)[-1] if transcript else "No result"
             if guarantee and guarantee not in final_content:
                 final_content = f"{guarantee}\n\n{final_content}"
+        if not completion.complete and task_board_summary:
+            final_content = task_board_summary
         if final_role:
             final_msg = await conversation_store.add_message(
                 chat_id,
@@ -1460,7 +1747,12 @@ class AgentOrchestrator:
                 final_content,
                 agent_id=final_role.id,
                 agent_name=final_role.name,
-                metadata={"synthesis": True},
+                metadata={
+                    "synthesis": True,
+                    "task_complete": completion.complete,
+                    "task_type": task_state.task_type.value,
+                    "pm_verification": verification,
+                },
             )
             outputs.append(final_msg)
 
@@ -1479,6 +1771,7 @@ class AgentOrchestrator:
         tools_enabled: bool = True,
         workspace_intent: WorkspaceIntent | None = None,
         path_context: str = "",
+        task_state: TaskState | None = None,
     ) -> str:
         """Compose system prompt with optional workspace and memory info."""
         base = role.system_prompt if role else "You are a helpful AI assistant."
@@ -1488,8 +1781,19 @@ class AgentOrchestrator:
             workspace = (
                 f"\n\nWorkspace root: {settings.workspace_root}\n"
                 "All file paths are relative to this directory.\n"
-                "When the user asks to create, save, or write files, you MUST use "
-                "write_file — never paste file contents in chat only.\n"
+            )
+            if workspace_intent and workspace_intent.wants_file_read:
+                workspace += (
+                    "When the user asks to read or list file content, you MUST use "
+                    "read_file and quote the content verbatim in your answer.\n"
+                    "Never invent file contents or reply with JSON status placeholders.\n"
+                )
+            else:
+                workspace += (
+                    "When the user asks to create, save, or write files, you MUST use "
+                    "write_file — never paste file contents in chat only.\n"
+                )
+            workspace += (
                 "To modify existing code, prefer search_files to locate exact positions, "
                 "then edit_file with match_id or old_string/new_text. "
                 "Use read_file with start_line/end_line to inspect numbered sections.\n"
@@ -1507,9 +1811,14 @@ class AgentOrchestrator:
                 workspace += f"\n\n{path_context}"
         elif path_context:
             workspace = f"\n\n{path_context}"
+        task_board = ""
+        if task_state:
+            board_block = format_task_board_block(task_state)
+            if board_block:
+                task_board = f"\n\n{board_block}"
         ambient = f"\n\n{self._ambient_context}" if self._ambient_context else ""
         memory = f"\n\n{memory_context}" if memory_context else ""
-        return base + workspace + web_search + ambient + memory
+        return base + workspace + web_search + task_board + ambient + memory
 
     async def _stream_llm_complete(
         self,
@@ -1560,6 +1869,14 @@ class AgentOrchestrator:
         "Your last reply was empty or unusable for the team discussion. "
         "Use write_file to create the requested files, then summarize what you wrote."
     )
+    READ_TOOL_USE_NUDGE = (
+        "You responded with JSON or a placeholder instead of reading the file. "
+        "Use read_file now for each requested path and quote the content verbatim."
+    )
+    READ_EMPTY_RESPONSE_NUDGE = (
+        "Your last reply was empty or unusable. "
+        "Use read_file to load the requested file and show its content to the team."
+    )
 
     @classmethod
     def _is_weak_discussion_content(cls, content: str) -> bool:
@@ -1574,18 +1891,23 @@ class AgentOrchestrator:
             return True
         if text in ("{}", "[]", "null", "undefined"):
             return True
-        if text.startswith("{") and len(text) <= 120:
+        if text.startswith("{") and len(text) <= 200:
             try:
                 parsed = json.loads(text)
             except json.JSONDecodeError:
                 return False
             if not parsed:
                 return True
-            if isinstance(parsed, dict) and not parsed.get("function") and not parsed.get("name"):
-                if set(parsed.keys()).issubset({"arguments", "parameters", "tool", "content"}):
-                    nested = parsed.get("arguments") or parsed.get("parameters") or {}
-                    if not nested:
+            if isinstance(parsed, dict):
+                if set(parsed.keys()).issubset({"status", "message", "error", "code", "data"}):
+                    status = str(parsed.get("status", "")).lower()
+                    if status in {"success", "error", "ok", "failed", "failure"}:
                         return True
+                if not parsed.get("function") and not parsed.get("name"):
+                    if set(parsed.keys()).issubset({"arguments", "parameters", "tool", "content"}):
+                        nested = parsed.get("arguments") or parsed.get("parameters") or {}
+                        if not nested:
+                            return True
         return False
 
     @classmethod
@@ -1829,6 +2151,8 @@ class AgentOrchestrator:
         mode_multi: bool = False,
         intervention_queue: asyncio.Queue[str] | None = None,
         workspace_intent: WorkspaceIntent | None = None,
+        task_state: TaskState | None = None,
+        round_num: int = 0,
     ) -> tuple[str, dict]:
         """Run LLM with tool calling loop."""
         llm, routing = await self._resolve_llm(user_content, role_id, mode_single)
@@ -1849,6 +2173,8 @@ class AgentOrchestrator:
             on_event=on_event,
             intervention_queue=intervention_queue,
             workspace_intent=intent,
+            task_state=task_state,
+            round_num=round_num,
         )
 
     async def _run_agent_tool_loop(
@@ -1868,6 +2194,8 @@ class AgentOrchestrator:
         on_event: Callable | None,
         intervention_queue: asyncio.Queue[str] | None = None,
         workspace_intent: WorkspaceIntent | None = None,
+        task_state: TaskState | None = None,
+        round_num: int = 0,
     ) -> tuple[str, dict]:
         """
         Execute or continue an agent tool-calling loop.
@@ -1957,27 +2285,56 @@ class AgentOrchestrator:
 
                 if not tool_calls:
                     content = result.get("content") or ""
-                    if (
-                        intent.wants_file_creation
-                        and tool_schemas
+                    needs_tool_nudge = (
+                        tool_schemas
                         and code_output_nudges < 2
                         and (
                             self._looks_like_code_only_output(content)
                             or self._is_weak_discussion_content(content)
                         )
+                    )
+                    if needs_tool_nudge and (
+                        intent.wants_file_creation or intent.wants_file_read
                     ):
                         messages.append({"role": "assistant", "content": content})
-                        nudge = (
-                            self.EMPTY_RESPONSE_NUDGE
-                            if self._is_weak_discussion_content(content)
-                            else self.TOOL_USE_NUDGE
-                        )
+                        if intent.wants_file_read:
+                            nudge = (
+                                self.READ_EMPTY_RESPONSE_NUDGE
+                                if self._is_weak_discussion_content(content)
+                                else self.READ_TOOL_USE_NUDGE
+                            )
+                        else:
+                            nudge = (
+                                self.EMPTY_RESPONSE_NUDGE
+                                if self._is_weak_discussion_content(content)
+                                else self.TOOL_USE_NUDGE
+                            )
                         messages.append({"role": "user", "content": nudge})
                         code_output_nudges += 1
+                        if task_state and role_id:
+                            increment_weak_retry(task_state, role_id)
                         continue
 
                     routing["model"] = result.get("model", routing.get("model"))
-                    return self._finalize_agent_content(content, tool_summaries), routing
+                    finalized = self._finalize_agent_content(content, tool_summaries)
+                    if (
+                        task_state
+                        and intent.requires_tools
+                        and self._is_weak_discussion_content(finalized)
+                        and role_id
+                        and not check_completion(task_state).complete
+                        and task_state.weak_retry_counts.get(role_id, 0) >= MAX_WEAK_RETRIES
+                    ):
+                        completion = check_completion(task_state)
+                        return (
+                            "[ASK_USER] "
+                            + build_escalation_message(
+                                task_state,
+                                role_id,
+                                reason=completion.reason,
+                            )
+                        ), routing
+                    return finalized, routing
 
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
@@ -2014,6 +2371,16 @@ class AgentOrchestrator:
                         agent_id=agent_id,
                         agent_name=agent_name,
                         on_event=on_event,
+                    )
+
+                    record_tool_result_as_fact(
+                        task_state,
+                        tc["name"],
+                        tc["arguments"],
+                        tool_result.output,
+                        tool_result.success,
+                        role_id or agent_id,
+                        round_num,
                     )
 
                     if tool_result.success:
@@ -2256,42 +2623,14 @@ class AgentOrchestrator:
         await approval_manager.respond(approval_id, response)
         command = str(target.payload.get("command", "")).strip()
         cwd_value = target.payload.get("cwd")
-        classification = classify_shell_command(command)
-        if not classification.allowed:
-            tool_msg = await record_command(
-                chat_id,
-                command=command,
-                cwd=cwd_value,
-                status="blocked",
-                success=False,
-                exit_code=None,
-                output=classification.reason,
-                agent_id=None,
-                agent_name=None,
-                approval_id=approval_id,
-            )
-            approval_manager.pop_resume_state(approval_id)
-            return tool_msg
-
-        cwd = settings.workspace_root
-        if cwd_value:
-            cwd = _resolve_path(str(cwd_value))
-
-        success, exit_code, formatted_output = await run_shell_command(command, cwd)
-        command_status = "success" if success else "failed"
-
-        tool_msg = await record_command(
+        tool_msg = await execute_approved_shell_command(
             chat_id,
             command=command,
-            cwd=cwd_value,
-            status=command_status,
-            success=success,
-            exit_code=exit_code,
-            output=formatted_output,
-            agent_id=None,
-            agent_name=None,
+            cwd=str(cwd_value).strip() if cwd_value else None,
             approval_id=approval_id,
+            on_event=None,
         )
+        formatted_output = tool_msg.content
         try:
             resume_state = approval_manager.pop_resume_state(approval_id)
         except ValueError:

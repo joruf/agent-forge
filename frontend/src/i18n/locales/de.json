@@ -43,6 +43,7 @@
     "singleAgentTooltip": "Ein Agent mit Rollen, Tools und Workspace-Zugriff — ideal für Coding, Debugging und fokussierte Entwicklung.",
     "multiAgentTooltip": "Mehrere Agenten diskutieren gemeinsam — ideal für Planung, Reviews, Architektur und komplexe Entscheidungen.",
     "deleteChat": "Chat löschen",
+    "chatList": "Chats",
     "renameChat": "Chat-Titel bearbeiten",
     "renameChatHint": "Doppelklick zum Bearbeiten",
     "chatRunning": "Agenten arbeiten…",

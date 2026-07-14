@@ -41,7 +41,63 @@ export function Sidebar({
   const [editTitle, setEditTitle] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const chatListRef = useRef<HTMLDivElement>(null);
   const skipBlurCommitRef = useRef(false);
+
+  const scrollChatIntoView = (chatId: string) => {
+    chatListRef.current
+      ?.querySelector(`[data-chat-id="${chatId}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  };
+
+  const selectChat = (chatId: string) => {
+    onSelectChat(chatId);
+    chatListRef.current?.focus({ preventScroll: true });
+  };
+
+  const handleChatListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (menuOpen || editingChatId) {
+      return;
+    }
+
+    if (event.key === "Delete" && activeChatId) {
+      event.preventDefault();
+      onDeleteChat(activeChatId);
+      return;
+    }
+
+    if (chats.length === 0) {
+      return;
+    }
+
+    const currentIndex = activeChatId
+      ? chats.findIndex((chat) => chat.id === activeChatId)
+      : -1;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      const nextIndex = currentIndex < 0 ? 0 : Math.min(currentIndex + 1, chats.length - 1);
+      if (nextIndex === currentIndex) {
+        return;
+      }
+      const nextChat = chats[nextIndex];
+      selectChat(nextChat.id);
+      scrollChatIntoView(nextChat.id);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const nextIndex =
+        currentIndex < 0 ? chats.length - 1 : Math.max(currentIndex - 1, 0);
+      if (nextIndex === currentIndex) {
+        return;
+      }
+      const nextChat = chats[nextIndex];
+      selectChat(nextChat.id);
+      scrollChatIntoView(nextChat.id);
+    }
+  };
 
   useEffect(() => {
     if (!menuOpen) {
@@ -186,10 +242,22 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="chat-list">
+      <div
+        ref={chatListRef}
+        className="chat-list"
+        role="listbox"
+        tabIndex={0}
+        aria-label={t("sidebar.chatList")}
+        aria-activedescendant={activeChatId ? `chat-item-${activeChatId}` : undefined}
+        onKeyDown={handleChatListKeyDown}
+      >
         {chats.map((chat) => (
           <div
             key={chat.id}
+            id={`chat-item-${chat.id}`}
+            data-chat-id={chat.id}
+            role="option"
+            aria-selected={chat.id === activeChatId}
             className={`chat-item ${chat.id === activeChatId ? "active" : ""}${
               editingChatId === chat.id ? " editing" : ""
             }`}
@@ -234,7 +302,7 @@ export function Sidebar({
               <button
                 type="button"
                 className="chat-item-btn"
-                onClick={() => onSelectChat(chat.id)}
+                onClick={() => selectChat(chat.id)}
               >
                 <div className="chat-item-title-row">
                   <span

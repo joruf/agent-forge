@@ -536,6 +536,15 @@ body.sidebar-resizing {
   padding: 8px;
 }
 
+.chat-list:focus {
+  outline: none;
+}
+
+.chat-list:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  border-radius: var(--radius);
+}
+
 .chat-item {
   display: flex;
   align-items: stretch;
@@ -545,7 +554,8 @@ body.sidebar-resizing {
   overflow: hidden;
 }
 
-.chat-item.active {
+.chat-item.active,
+.chat-item[aria-selected="true"] {
   background: var(--bg-hover);
 }
 

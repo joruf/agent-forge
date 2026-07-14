@@ -57,6 +57,14 @@ def live_tests_enabled() -> bool:
 
 
 @pytest.fixture
+def chat_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mark orchestration as ready without contacting external model providers."""
+    from tests.helpers.orchestration_test_helpers import patch_chat_ready
+
+    patch_chat_ready(monkeypatch)
+
+
+@pytest.fixture
 def ollama_base_url(live_tests_enabled: bool) -> str:
     """Return configured Ollama URL for live tests."""
     if not live_tests_enabled:

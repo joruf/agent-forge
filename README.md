@@ -524,6 +524,7 @@ AgentForge/
 ├── docs/
 │   ├── USER_MANUAL.md
 │   ├── USER_MANUAL.html       # End-user guide
+│   ├── TECHNICAL_DOCUMENTATION.md
 │   └── TECHNICAL_DOCUMENTATION.html
 ├── install.py               # Dependency installer
 ├── run.py                   # Launcher (backend + frontend + window)
@@ -585,7 +586,8 @@ python3 run_tests.py --live
 | [README.md](README.md) | Everyone | Overview + install |
 | [docs/USER_MANUAL.md](docs/USER_MANUAL.md) | End users | Full usage guide (Markdown) |
 | [docs/USER_MANUAL.html](docs/USER_MANUAL.html) | End users | Full usage guide (HTML) |
-| [docs/TECHNICAL_DOCUMENTATION.html](docs/TECHNICAL_DOCUMENTATION.html) | Developers | Architecture, API, internals |
+| [docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md) | Developers | Architecture, internals (Markdown, DE) |
+| [docs/TECHNICAL_DOCUMENTATION.html](docs/TECHNICAL_DOCUMENTATION.html) | Developers | Architecture, API, internals (HTML) |
 
 Open the HTML documentation in any browser:
 

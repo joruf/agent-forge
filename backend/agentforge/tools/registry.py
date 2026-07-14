@@ -101,10 +101,15 @@ class ReadFileTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> ToolCallResult:
         """Read file and return contents."""
+        from agentforge.services.command_audit import record_read_file
+
+        relative_path = str(arguments["path"])
         try:
-            path = _resolve_path(arguments["path"])
+            path = _resolve_path(relative_path)
             if not path.exists():
-                return ToolCallResult(tool=self.name, success=False, output=f"File not found: {path}")
+                output = f"File not found: {path}"
+                await record_read_file(relative_path, output=output, success=False)
+                return ToolCallResult(tool=self.name, success=False, output=output)
             content = path.read_text(encoding="utf-8", errors="replace")
             lines = content.splitlines()
             start_line = arguments.get("start_line")
@@ -115,10 +120,12 @@ class ReadFileTool(BaseTool):
                 start_index = max(1, int(start_line or 1)) - 1
                 end_index = int(end_line or len(lines)) - 1
                 if start_index < 0 or end_index >= len(lines):
+                    output = "Line range is out of bounds."
+                    await record_read_file(relative_path, output=output, success=False)
                     return ToolCallResult(
                         tool=self.name,
                         success=False,
-                        output="Line range is out of bounds.",
+                        output=output,
                     )
                 selected = "\n".join(lines[start_index:end_index + 1])
                 if numbered:
@@ -130,8 +137,10 @@ class ReadFileTool(BaseTool):
 
             if len(content) > settings.max_output_chars:
                 content = content[: settings.max_output_chars] + "\n... [truncated]"
+            await record_read_file(relative_path, output=content, success=True)
             return ToolCallResult(tool=self.name, success=True, output=content)
         except Exception as exc:
+            await record_read_file(relative_path, output=str(exc), success=False)
             return ToolCallResult(tool=self.name, success=False, output=str(exc))
 
 
@@ -402,14 +411,22 @@ class ListDirectoryTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> ToolCallResult:
         """List directory entries."""
+        from agentforge.services.command_audit import record_list_directory
+
+        relative_path = str(arguments.get("path", ".")).strip() or "."
         try:
-            path = _resolve_path(arguments.get("path", "."))
+            path = _resolve_path(relative_path)
             if not path.is_dir():
-                return ToolCallResult(tool=self.name, success=False, output="Not a directory")
+                output = "Not a directory"
+                await record_list_directory(relative_path, output=output, success=False)
+                return ToolCallResult(tool=self.name, success=False, output=output)
             entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
             lines = [f"{'[DIR]' if e.is_dir() else '[FILE]'} {e.name}" for e in entries[:200]]
-            return ToolCallResult(tool=self.name, success=True, output="\n".join(lines) or "(empty)")
+            output = "\n".join(lines) or "(empty)"
+            await record_list_directory(relative_path, output=output, success=True)
+            return ToolCallResult(tool=self.name, success=True, output=output)
         except Exception as exc:
+            await record_list_directory(relative_path, output=str(exc), success=False)
             return ToolCallResult(tool=self.name, success=False, output=str(exc))
 
 
