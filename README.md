@@ -10,6 +10,44 @@
 
 ---
 
+## Quick install (copy & paste)
+
+Use the built-in project installer (`install.py`).
+
+### Linux (Debian/Ubuntu/Linux Mint)
+
+```bash
+git clone https://github.com/joruf/agent-forge.git
+cd agent-forge
+python3 install.py --system
+python3 install.py
+cp -n .env.example backend/.env
+```
+
+### macOS
+
+Prerequisites: install `git`, Python 3.12+, Node.js 20+ (with npm).
+
+```bash
+git clone https://github.com/joruf/agent-forge.git
+cd agent-forge
+python3 install.py
+cp -n .env.example backend/.env
+```
+
+### Windows (PowerShell)
+
+Prerequisites: install Git, Python 3.12+, Node.js 20+ (with npm).
+
+```powershell
+git clone https://github.com/joruf/agent-forge.git
+cd agent-forge
+py -3 install.py
+copy .env.example backend\.env
+```
+
+---
+
 ## What is AgentForge?
 
 AgentForge is a local-first AI assistant that can read and write files in your workspace, run shell commands (with approval), and coordinate multiple specialized agent roles on complex tasks. It connects to **Ollama** on your machine or network (e.g. Synology NAS) and optionally to **OpenAI, Anthropic, Google Gemini, Groq, and Mistral** cloud APIs.
@@ -299,8 +337,8 @@ AgentForge is **not Linux-only**. The backend and frontend use standard Python a
 | OS | Status | Notes |
 |----|--------|-------|
 | **Linux** | Primary / best tested | Full installer (`install.py`), desktop shortcut, shell-tool defaults tuned for Unix |
-| **Windows** | Supported | Manual setup: Python venv, `npm install`, `python run.py`; use browser mode or your own browser; adjust `AGENTFORGE_WORKSPACE_ROOT` and shell whitelist if needed |
-| **macOS** | Supported | Same manual flow as Windows; Ollama is typically installed locally |
+| **Windows** | Supported | Use `py -3 install.py` after installing Git + Python + Node.js; browser mode is usually the simplest start |
+| **macOS** | Supported | Use `python3 install.py` after installing Git + Python + Node.js; Ollama is typically installed locally |
 
 What differs by platform is mostly **integration**, not the core product:
 
@@ -317,64 +355,42 @@ If something fails on Windows or macOS, it is usually a small path, shell, or la
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/AgentForge.git
-cd AgentForge
+git clone https://github.com/joruf/agent-forge.git
+cd agent-forge
 ```
 
-> Replace `YOUR_USERNAME` with your GitHub account or organization name once the repository is published.
+### 2. Install prerequisites
 
-### 2. Install system packages
+- **Linux (Debian/Ubuntu/Linux Mint):** prerequisites can be installed by the project installer (`python3 install.py --system` in step 3).
+- **Windows/macOS:** install **Git**, **Python 3.12+**, and **Node.js 20+ (npm included)** first.
 
-#### Linux (recommended automated path)
+### 3. Run the built-in installer
 
-On Debian/Ubuntu/Linux Mint:
-
-```bash
-sudo apt update
-sudo apt install -y python3 python3-venv python3-pip nodejs npm chromium-browser curl
-```
-
-For the native Tauri desktop build, also install Tauri Linux dependencies:
+Linux:
 
 ```bash
 python3 install.py --system
+python3 install.py
 ```
 
-#### Windows and macOS (manual path)
-
-1. Install **Python 3.12+** and **Node.js 20+** from the official installers.
-2. Install **Ollama** for your OS if you want local models.
-3. Clone the repo and continue with step 3 below (venv + npm manually instead of `install.py`, or run `python install.py` — it skips Linux-only steps on other OSes).
-
-Quick start on any OS after dependencies are installed:
-
-```bash
-cd backend
-python -m venv .venv
-# Linux/macOS: source .venv/bin/activate
-# Windows:     .venv\Scripts\activate
-pip install -r requirements.txt
-cd ../frontend
-npm install
-cd ..
-cp .env.example backend/.env   # edit paths for your OS
-AGENTFORGE_MODE=browser python run.py
-```
-
-### 3. Run the Linux installer
+macOS:
 
 ```bash
 python3 install.py
 ```
 
-This will (Linux):
+Windows (PowerShell):
+
+```powershell
+py -3 install.py
+```
+
+The installer will:
 
 1. Create a Python virtual environment in `backend/.venv`
 2. Install Python dependencies from `backend/requirements.txt`
 3. Install frontend npm packages in `frontend/`
-4. Create a Linux desktop shortcut (application menu entry)
-
-On Windows/macOS, perform the equivalent steps from the manual path above instead.
+4. Create a desktop shortcut on Linux (application menu entry)
 
 ### 4. Configure environment
 

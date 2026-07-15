@@ -15,6 +15,11 @@ FRONTEND = ROOT / "frontend"
 
 def install_system_deps() -> None:
     """Install Linux packages for Tauri and Chromium."""
+    if not sys.platform.startswith("linux"):
+        print("System dependency auto-install is available on Linux only.")
+        print("Please install Python 3.12+ and Node.js 20+ manually on this OS.")
+        return
+
     print("Installing system dependencies for native desktop (Tauri)...")
     if not shutil_which("apt-get"):
         print("Please install Python 3.12+, Node.js 20+, Chromium, and Tauri Linux deps manually.")
@@ -45,9 +50,11 @@ def install_backend() -> None:
     """Create venv and install Python dependencies."""
     print("Setting up Python backend...")
     subprocess.run([sys.executable, "-m", "venv", str(BACKEND / ".venv")], cwd=BACKEND, check=True)
-    pip = BACKEND / ".venv" / "bin" / "pip"
-    subprocess.run([str(pip), "install", "--upgrade", "pip", "-q"], check=True)
-    subprocess.run([str(pip), "install", "-r", "requirements.txt", "-q"], cwd=BACKEND, check=True)
+    venv_python = BACKEND / ".venv" / ("Scripts/python.exe" if sys.platform.startswith("win") else "bin/python")
+    if not venv_python.exists():
+        venv_python = BACKEND / ".venv" / ("Scripts/python" if sys.platform.startswith("win") else "bin/python")
+    subprocess.run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "-q"], check=True)
+    subprocess.run([str(venv_python), "-m", "pip", "install", "-r", "requirements.txt", "-q"], cwd=BACKEND, check=True)
     print("Backend ready.")
 
 
@@ -73,6 +80,10 @@ def install_desktop_hint() -> None:
 
 def create_desktop_entry() -> None:
     """Create Linux desktop launcher via shared desktop setup."""
+    if not sys.platform.startswith("linux"):
+        print("Skipping desktop shortcut creation (Linux only).")
+        return
+
     from desktop_setup import install_desktop_shortcut, mark_initialization_done
 
     success, path = install_desktop_shortcut()
@@ -104,7 +115,8 @@ def main() -> None:
     create_desktop_entry()
     print("")
     print("=== Installation complete ===")
-    print(f"Start AgentForge: python3 {ROOT / 'run.py'}")
+    start_cmd = "py -3" if sys.platform.startswith("win") else "python3"
+    print(f"Start AgentForge: {start_cmd} {ROOT / 'run.py'}")
     print("Or open AgentForge from your application menu.")
 
 
