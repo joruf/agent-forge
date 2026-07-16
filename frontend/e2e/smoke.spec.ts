@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test.describe("AgentForge UI smoke", () => {
   test("shows offline screen when backend is unreachable", async ({ page }) => {
     await page.addInitScript(() => {
-      window.localStorage.setItem("agentforge.locale", "en");
+      window.localStorage.setItem("agentforge-language", "en");
     });
     await page.goto("/");
     await expect(page.locator(".offline-screen h1")).toHaveText("AgentForge");

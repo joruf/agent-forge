@@ -626,8 +626,11 @@ python3 run_tests.py
 # Frontend unit tests (Vitest)
 cd frontend && npm run test:unit
 
-# Frontend E2E smoke (Playwright; starts Vite dev server)
+# Frontend E2E (Playwright; starts Vite dev server, mocks API for chat/roles tests)
 cd frontend && npm run test:e2e
+
+# Production frontend build (required for python3 run.py --prod)
+cd frontend && npm run build
 
 # Include live Ollama integration tests
 python3 run_tests.py --live
@@ -701,9 +704,10 @@ cd frontend && npm run tauri:build
 
 ## Roadmap (Phase 2+)
 
+Shipped in current releases: web search tool, custom role editor in Settings → Agents.
+
 - PDF/Word document read/write with auto-install of dependencies
 - REST API integrations beyond web search
-- Custom role editor in the UI
 - Plugin system for external tools
 
 ---
