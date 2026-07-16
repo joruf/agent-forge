@@ -2066,6 +2066,44 @@ body.sidebar-resizing {
   border: 1px solid rgba(229, 115, 115, 0.35);
 }
 
+.message-prompt-corrections {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: rgba(79, 156, 249, 0.08);
+  border: 1px solid rgba(79, 156, 249, 0.28);
+}
+
+.message-prompt-corrections-title {
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.message-prompt-corrections-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 0.84rem;
+}
+
+.message-prompt-corrections-list li {
+  margin-bottom: 4px;
+}
+
+.message-prompt-corrections-list code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.82rem;
+}
+
+.message-prompt-corrections-hint {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 .message-user-error-text {
   color: var(--danger, #e57373);
   font-size: 0.85rem;

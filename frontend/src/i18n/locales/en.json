@@ -83,6 +83,8 @@
     "tryAgain": "Try again",
     "resend": "Resend",
     "copyMessage": "Copy message",
+    "promptCorrectedTitle": "Prompt corrected before processing",
+    "promptCorrectedHint": "Your original message is unchanged. AgentForge adjusted intent keywords and file extensions only.",
     "stop": "Stop",
     "inputPlaceholderActive": "Continue the discussion… (Enter to send, Shift+Enter or Ctrl+Enter for new line)",
     "inputPlaceholder": "Enter a message… (Enter to send, Shift+Enter or Ctrl+Enter for new line)",

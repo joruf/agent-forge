@@ -40,6 +40,12 @@ export interface Chat {
   updated_at: string;
 }
 
+export interface PromptCorrection {
+  original: string;
+  corrected: string;
+  reason?: string;
+}
+
 export interface Message {
   id: string;
   chat_id: string;

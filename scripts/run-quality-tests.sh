@@ -33,6 +33,7 @@ ${PYTEST} -q \
   tests/test_named_folder_intent.py \
   tests/test_workspace_agenda.py \
   tests/test_workspace_path_resolver.py \
+  tests/test_prompt_normalizer.py \
   tests/test_shell_commands.py \
   tests/test_tools.py
 

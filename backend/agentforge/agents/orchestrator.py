@@ -34,7 +34,12 @@ from agentforge.agents.task_state import (
     seed_list_directory_facts,
     MAX_WEAK_RETRIES,
 )
-from agentforge.agents.workspace_agenda import AgendaAction, build_workspace_agenda
+from agentforge.agents.prompt_normalizer import (
+    PromptNormalizationResult,
+    format_prompt_normalization_block,
+    normalize_user_prompt,
+    prompt_normalization_metadata,
+)
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.agents.workspace_path_resolver import (
     activate_path_resolution_context,
@@ -1250,10 +1255,32 @@ class AgentOrchestrator:
         memory_context = await memory_store.get_context(chat_id, memory_settings)
         tools = self._build_tools(chat_id, memory_settings.memory_scope)
 
+        normalization = normalize_user_prompt(user_content)
+        interpretation_content = normalization.normalized
+        prompt_corrections = [
+            {
+                "original": correction.original,
+                "corrected": correction.corrected,
+                "reason": correction.reason,
+            }
+            for correction in normalization.corrections
+        ]
+        normalization_metadata = prompt_normalization_metadata(normalization)
+
         if record_user_message:
-            await conversation_store.add_message(
-                chat_id, MessageRole.USER, user_content
+            user_message = await conversation_store.add_message(
+                chat_id,
+                MessageRole.USER,
+                user_content,
+                metadata=normalization_metadata or None,
             )
+            if on_event and normalization_metadata:
+                await on_event({
+                    "type": "prompt_normalized",
+                    "message_id": user_message.id,
+                    "prompt_corrections": normalization_metadata["prompt_corrections"],
+                    "interpreted_request": normalization_metadata["interpreted_request"],
+                })
 
         readiness = await run_readiness_check(include_inference=False)
         if not readiness.get("chat_ready"):
@@ -1273,10 +1300,19 @@ class AgentOrchestrator:
                 effective_execution_strategy=effective_strategy,
             )
 
-        workspace_intent = detect_workspace_intent(user_content)
+        workspace_intent = detect_workspace_intent(interpretation_content)
         prior_board = await load_task_board_memory(chat_id)
-        task_state = build_task_state(user_content, workspace_intent, prior_board)
-        path_resolution = build_path_resolution_context(user_content, workspace_intent)
+        task_state = build_task_state(
+            user_content,
+            workspace_intent,
+            prior_board,
+            interpreted_request=interpretation_content,
+            prompt_corrections=prompt_corrections,
+        )
+        path_resolution = build_path_resolution_context(
+            interpretation_content,
+            workspace_intent,
+        )
         path_context_token = activate_path_resolution_context(path_resolution)
         prefetched_reads: dict[str, str] = {}
         try:
@@ -1287,7 +1323,7 @@ class AgentOrchestrator:
             async with command_audit_scope(chat_id, "system", "System", on_event):
                 if read_only:
                     prefetched_reads = await prefetch_read_file_contents(
-                        user_content,
+                        interpretation_content,
                         workspace_intent,
                     )
                     seed_read_facts(task_state, prefetched_reads)
@@ -1324,7 +1360,7 @@ class AgentOrchestrator:
             if mode == OrchestrationMode.MULTI:
                 result = await self._run_multi(
                     chat_id,
-                    user_content,
+                    interpretation_content,
                     role_ids,
                     memory_context,
                     tools,
@@ -1336,6 +1372,7 @@ class AgentOrchestrator:
                     path_context=path_context,
                     task_state=task_state,
                     prefetched_reads=prefetched_reads,
+                    prompt_normalization=normalization,
                 )
             elif mode == OrchestrationMode.QUICK:
                 result = await self._run_quick(
@@ -1351,7 +1388,7 @@ class AgentOrchestrator:
             else:
                 result = await self._run_single(
                     chat_id,
-                    user_content,
+                    interpretation_content,
                     role_ids,
                     memory_context,
                     tools,
@@ -1363,6 +1400,7 @@ class AgentOrchestrator:
                     path_context=path_context,
                     task_state=task_state,
                     prefetched_reads=prefetched_reads,
+                    prompt_normalization=normalization,
                 )
                 if result.resolved_role_id:
                     await conversation_store.update_chat(
@@ -1390,8 +1428,10 @@ class AgentOrchestrator:
         path_context: str = "",
         task_state: TaskState | None = None,
         prefetched_reads: dict[str, str] | None = None,
+        prompt_normalization: PromptNormalizationResult | None = None,
     ) -> OrchestrationResponse:
         """Single agent with a selected software-development role."""
+        _ = prompt_normalization
         await self._ensure_not_cancelled()
         prefetched_reads = prefetched_reads or {}
         role_id, used_auto = resolve_single_role(role_ids, user_content)
@@ -1642,6 +1682,7 @@ class AgentOrchestrator:
         path_context: str = "",
         task_state: TaskState | None = None,
         prefetched_reads: dict[str, str] | None = None,
+        prompt_normalization: PromptNormalizationResult | None = None,
     ) -> OrchestrationResponse:
         """Multi-agent discussion with project manager synthesis."""
         if not role_ids:
@@ -1657,7 +1698,16 @@ class AgentOrchestrator:
             roles = [fallback]
 
         discussions: list[AgentMessage] = []
-        transcript: list[str] = [f"User request: {user_content}"]
+        display_request = (
+            prompt_normalization.original
+            if prompt_normalization is not None
+            else user_content
+        )
+        transcript: list[str] = [f"User request: {display_request}"]
+        if prompt_normalization and prompt_normalization.changed:
+            normalization_block = format_prompt_normalization_block(prompt_normalization)
+            if normalization_block:
+                transcript.append(normalization_block)
         outputs: list[MessageResponse] = []
 
         pm = role_registry.get_role("project_manager")

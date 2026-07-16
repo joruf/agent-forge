@@ -83,6 +83,8 @@
     "tryAgain": "Erneut versuchen",
     "resend": "Erneut senden",
     "copyMessage": "Nachricht kopieren",
+    "promptCorrectedTitle": "Prompt vor der Verarbeitung korrigiert",
+    "promptCorrectedHint": "Die Originalnachricht bleibt unverändert. AgentForge hat nur Intent-Keywords und Dateiendungen angepasst.",
     "stop": "Stopp",
     "inputPlaceholderActive": "Diskussion fortsetzen… (Enter senden, Shift+Enter oder Strg+Enter neue Zeile)",
     "inputPlaceholder": "Nachricht eingeben… (Enter senden, Shift+Enter oder Strg+Enter neue Zeile)",

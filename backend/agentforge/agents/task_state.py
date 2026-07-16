@@ -105,6 +105,8 @@ class TaskState:
 
     user_request: str
     task_type: TaskType
+    interpreted_request: str = ""
+    prompt_corrections: list[dict[str, str]] = field(default_factory=list)
     targets: list[str] = field(default_factory=list)
     facts: list[TaskFact] = field(default_factory=list)
     plan_steps: list[TaskPlanStep] = field(default_factory=list)
@@ -296,6 +298,9 @@ def build_task_state(
     user_content: str,
     intent: WorkspaceIntent,
     prior_payload: dict[str, Any] | None = None,
+    *,
+    interpreted_request: str | None = None,
+    prompt_corrections: list[dict[str, str]] | None = None,
 ) -> TaskState:
     """
     Initialize a task board for the current orchestration run.
@@ -303,10 +308,13 @@ def build_task_state(
     :param user_content: Original user message
     :param intent: Parsed workspace intent
     :param prior_payload: Optional persisted task-board snapshot from earlier turns
+    :param interpreted_request: Spell-normalized message used for intent parsing
+    :param prompt_corrections: Applied pre-processing corrections
     :return: Initialized task state
     """
     task_type = classify_task_type(intent)
-    agenda_plan, agenda_targets = build_plan_from_agenda(user_content, intent)
+    processing_content = interpreted_request or user_content
+    agenda_plan, agenda_targets = build_plan_from_agenda(processing_content, intent)
     if agenda_plan:
         targets = agenda_targets
         plan_steps = agenda_plan
@@ -321,6 +329,8 @@ def build_task_state(
 
     state = TaskState(
         user_request=user_content,
+        interpreted_request=processing_content,
+        prompt_corrections=list(prompt_corrections or []),
         task_type=task_type,
         targets=targets,
         plan_steps=plan_steps,
@@ -963,12 +973,19 @@ def format_task_plan_block(task_state: TaskState) -> str:
     lines = [
         f"Task type: {task_state.task_type.value}",
     ]
+    if task_state.prompt_corrections:
+        lines.append("Prompt normalization:")
+        for correction in task_state.prompt_corrections:
+            lines.append(
+                f'- "{correction["original"]}" -> "{correction["corrected"]}"'
+            )
     if task_state.targets:
         lines.append("Targets: " + ", ".join(task_state.targets))
+    processing_content = task_state.interpreted_request or task_state.user_request
     agenda_block = format_agenda_block(
         build_workspace_agenda(
-            task_state.user_request,
-            detect_workspace_intent(task_state.user_request),
+            processing_content,
+            detect_workspace_intent(processing_content),
         )
     )
     if agenda_block:

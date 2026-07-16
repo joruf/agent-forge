@@ -10,6 +10,7 @@ import type {
   ExecutionStrategy,
   Message,
   NewChatDraft,
+  PromptCorrection,
   ShellCommandEntry,
 } from "../types";
 import { api } from "../services/api";
@@ -40,6 +41,30 @@ interface WorkingAgentInfo {
 
 function formatRoutingModel(model: string): string {
   return model.replace(/^ollama\//, "");
+}
+
+function readPromptCorrections(message: Message): PromptCorrection[] {
+  const raw = message.metadata?.prompt_corrections;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+    const original = String((entry as PromptCorrection).original ?? "").trim();
+    const corrected = String((entry as PromptCorrection).corrected ?? "").trim();
+    if (!original || !corrected || original === corrected) {
+      return [];
+    }
+    return [{
+      original,
+      corrected,
+      reason: typeof (entry as PromptCorrection).reason === "string"
+        ? (entry as PromptCorrection).reason
+        : undefined,
+    }];
+  });
 }
 
 interface ChatPanelProps {
@@ -657,6 +682,34 @@ export function ChatPanel({
             ]);
           }
 
+          if (data.type === "prompt_normalized" && Array.isArray(data.prompt_corrections)) {
+            setMessages((prev) => {
+              const messageId = typeof data.message_id === "string" ? data.message_id : null;
+              let targetIndex = messageId
+                ? prev.findIndex((message) => message.id === messageId)
+                : -1;
+              if (targetIndex < 0) {
+                targetIndex = prev.findLastIndex((message) => message.role === "user");
+              }
+              if (targetIndex < 0) {
+                return prev;
+              }
+              return prev.map((message, index) => (
+                index === targetIndex
+                  ? {
+                      ...message,
+                      id: messageId ?? message.id,
+                      metadata: {
+                        ...message.metadata,
+                        prompt_corrections: data.prompt_corrections,
+                        interpreted_request: data.interpreted_request,
+                      },
+                    }
+                  : message
+              ));
+            });
+          }
+
           if (data.type === "user_message") {
             void api.listMessages(activeChat.id).then(setMessages);
           }
@@ -946,6 +999,7 @@ export function ChatPanel({
               ? String(routing.model).replace(/^ollama\//, "")
               : null;
             const errorText = messageErrors[msg.id];
+            const promptCorrections = msg.role === "user" ? readPromptCorrections(msg) : [];
             const isLastUserMessage = msg.role === "user" && msg.id === lastUserMessageId;
 
             return (
@@ -1001,6 +1055,25 @@ export function ChatPanel({
                 </span>
               </div>
               <ExpandableText text={msg.content} previewLength={500} />
+              {promptCorrections.length > 0 && (
+                <div className="message-prompt-corrections" role="note">
+                  <div className="message-prompt-corrections-title">
+                    {t("chat.promptCorrectedTitle")}
+                  </div>
+                  <ul className="message-prompt-corrections-list">
+                    {promptCorrections.map((correction) => (
+                      <li key={`${correction.original}-${correction.corrected}`}>
+                        <code>{correction.original}</code>
+                        <span aria-hidden="true"> → </span>
+                        <code>{correction.corrected}</code>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="message-prompt-corrections-hint">
+                    {t("chat.promptCorrectedHint")}
+                  </div>
+                </div>
+              )}
               {msg.role === "user" && errorText && (
                 <div className="message-user-error">
                   <div className="message-user-error-text">{errorText}</div>
