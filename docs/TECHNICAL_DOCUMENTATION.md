@@ -388,6 +388,8 @@ Verifizierte Information während der Orchestrierung:
 
 Vor finaler Synthese prüft der Orchestrator, ob alle Ziele erfüllt sind (z. B. fehlende Dateien → Weak-Retry, max. 2×).
 
+Bei `TaskType.WORKFLOW` nutzt der Completion-Check die **`interpreted_request`**-Variante (nach Prompt-Normalizer) für Agenda und Edit-Schritte — nicht den rohen User-Text mit Tippfehlern.
+
 ### Seed-Funktionen
 
 | Funktion | Wann |
@@ -700,6 +702,7 @@ Enthält:
 | `test_command_audit_mandatory.py` | Pflicht-Audit für ls, read, list, Shell |
 | `test_prompt_intent_matrix.py` | Intent-Erkennung (parametrisiert) |
 | `test_prompt_orchestration_outcomes.py` | E2E-Orchestrierung (gemocktes LLM) |
+| `test_prompt_compound_outcomes.py` | Compound-Prompts: Typos, falsche Pfade, Workflow |
 | `test_prompt_task_board_outcomes.py` | Task Board Unit-Tests |
 | `test_prompt_path_extraction.py` | Pfad-Extraktion Regression |
 | `test_prompt_normalizer.py` | Prompt-Normalizer (Typo/Keyword-Korrektur) |

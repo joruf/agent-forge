@@ -29,6 +29,11 @@ from agentforge.agents.workspace_intent import detect_workspace_intent
             "erstlle",
             "erstelle",
         ),
+        (
+            "bearbeitte danach die Datei index.html",
+            "bearbeitte",
+            "bearbeite",
+        ),
     ],
 )
 def test_normalize_user_prompt_fixes_common_typos(

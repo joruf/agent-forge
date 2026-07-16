@@ -702,7 +702,7 @@ cd frontend && npm run tauri:build
 ## Roadmap (Phase 2+)
 
 - PDF/Word document read/write with auto-install of dependencies
-- Web search and REST API integrations
+- REST API integrations beyond web search
 - Custom role editor in the UI
 - Plugin system for external tools
 

@@ -75,6 +75,7 @@ EXPLICIT_KEYWORD_ALIASES: dict[str, str] = {
     "erstlelen": "erstellen",
     "lees": "lese",
     "lies": "lese",
+    "bearbeitte": "bearbeite",
     "ordenr": "ordner",
     "ordnr": "ordner",
     "verzeichniss": "verzeichnis",

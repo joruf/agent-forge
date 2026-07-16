@@ -166,6 +166,7 @@ class TaskState:
         """
         return {
             "last_request": self.user_request,
+            "interpreted_request": self.interpreted_request,
             "last_task_type": self.task_type.value,
             "last_targets": self.targets,
             "facts": [fact.to_dict() for fact in self.facts[-MAX_PERSISTED_FACTS:]],
@@ -689,8 +690,13 @@ def check_completion(task_state: TaskState) -> CompletionReport:
                 reason="Missing verified file content after write",
                 missing=missing_reads,
             )
-        intent = detect_workspace_intent(task_state.user_request)
-        agenda = build_workspace_agenda(task_state.user_request, intent)
+        intent = detect_workspace_intent(
+            task_state.interpreted_request or task_state.user_request,
+        )
+        agenda = build_workspace_agenda(
+            task_state.interpreted_request or task_state.user_request,
+            intent,
+        )
         edit_paths = [
             step.path
             for step in agenda

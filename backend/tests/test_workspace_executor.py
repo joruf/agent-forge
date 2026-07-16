@@ -66,6 +66,15 @@ def test_fallback_file_content_html_scaffold() -> None:
     assert "<footer>" in content
 
 
+def test_fallback_file_content_html_includes_quoted_literal() -> None:
+    """Quoted body text from the user request is embedded in HTML fallbacks."""
+    content = fallback_file_content(
+        "GitHub/Test12/index.html",
+        'Create index.html with the text "Hello World"',
+    )
+    assert "Hello World" in content
+
+
 def test_build_implementation_prompt_lists_targets() -> None:
     """Implementation prompt names each required file path."""
     prompt = build_implementation_prompt(

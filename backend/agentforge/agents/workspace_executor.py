@@ -337,12 +337,14 @@ def plan_deliverable_files(user_content: str, intent: WorkspaceIntent) -> list[s
 def default_html_scaffold(
     css_href: str | None = None,
     js_src: str | None = None,
+    main_text: str | None = None,
 ) -> str:
     """
     Return a minimal HTML scaffold with header, menu, content, and footer.
 
     :param css_href: Optional external stylesheet path
     :param js_src: Optional external JavaScript path
+    :param main_text: Optional main content paragraph text
     :return: HTML document string
     """
     css_link = f'  <link rel="stylesheet" href="{css_href}">\n' if css_href else ""
@@ -362,6 +364,11 @@ def default_html_scaffold(
         if js_src
         else ""
     )
+    main_paragraph = (
+        f"    <p>{main_text}</p>\n"
+        if main_text
+        else "    <p>Main content area.</p>\n"
+    )
     return f"""<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -380,8 +387,7 @@ def default_html_scaffold(
   </nav>
   <main>
     <h2>Content</h2>
-    <p>Main content area.</p>
-{browser_block}  </main>
+{main_paragraph}{browser_block}  </main>
   <footer>
     <p>Footer</p>
   </footer>
@@ -462,7 +468,12 @@ def _html_scaffold_for_request(user_content: str) -> str:
     matched = {spec.type_id for spec in match_deliverable_file_types(user_content or "")}
     css_href = "styles.css" if "css" in matched else None
     js_src = "app.js" if "javascript" in matched else None
-    return default_html_scaffold(css_href=css_href, js_src=js_src)
+    literal = extract_literal_text_content(user_content)
+    return default_html_scaffold(
+        css_href=css_href,
+        js_src=js_src,
+        main_text=literal,
+    )
 
 
 def default_php_scaffold() -> str:
