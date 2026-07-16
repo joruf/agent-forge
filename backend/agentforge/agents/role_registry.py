@@ -166,15 +166,49 @@ class RoleRegistry:
 
     def add_role(self, role: AgentRole) -> AgentRole:
         """Register a custom role and persist to disk."""
+        if role.id in self._roles:
+            existing = self._roles[role.id]
+            if existing.is_builtin:
+                raise ValueError(f"Role id '{role.id}' conflicts with a built-in role")
+            raise ValueError(f"Role id '{role.id}' already exists")
         role.is_builtin = False
         self._roles[role.id] = role
+        self._persist_role(role)
+        return role
+
+    def update_role(self, role_id: str, role: AgentRole) -> AgentRole:
+        """Update an existing custom role and persist to disk."""
+        existing = self._roles.get(role_id)
+        if not existing:
+            raise KeyError(role_id)
+        if existing.is_builtin:
+            raise ValueError("Built-in roles cannot be modified")
+        role.id = role_id
+        role.is_builtin = False
+        self._roles[role_id] = role
+        self._persist_role(role)
+        return role
+
+    def delete_role(self, role_id: str) -> None:
+        """Remove a custom role from memory and delete its file."""
+        existing = self._roles.get(role_id)
+        if not existing:
+            raise KeyError(role_id)
+        if existing.is_builtin:
+            raise ValueError("Built-in roles cannot be deleted")
+        del self._roles[role_id]
+        path = self.roles_dir / f"{role_id}.yaml"
+        if path.exists():
+            path.unlink()
+
+    def _persist_role(self, role: AgentRole) -> None:
+        """Write a custom role to the roles directory."""
         self.roles_dir.mkdir(parents=True, exist_ok=True)
         path = self.roles_dir / f"{role.id}.yaml"
         path.write_text(
             yaml.dump(role.model_dump(), allow_unicode=True, default_flow_style=False),
             encoding="utf-8",
         )
-        return role
 
 
 role_registry = RoleRegistry()

@@ -17,11 +17,13 @@ import { DEFAULT_MEMORY_TOKENS, normalizeMemoryTokens, type MemoryTokenOption } 
 import { MemoryTokenSelect } from "./MemoryTokenSelect";
 import { TestResultsList } from "./TestResultsList";
 import { ContextPluginsList } from "./ContextPluginsList";
+import { RoleEditorPanel } from "./RoleEditorPanel";
 import { api } from "../services/api";
 
 interface SettingsModalProps {
   settings: AppSettings | null;
   roles: AgentRole[];
+  onRolesChanged: (roles: AgentRole[]) => void;
   theme: ThemeMode;
   locale: Locale;
   open: boolean;
@@ -64,6 +66,7 @@ function formatCommandList(commands: string[]): string {
 export function SettingsModal({
   settings,
   roles,
+  onRolesChanged,
   theme,
   locale,
   open,
@@ -413,16 +416,7 @@ export function SettingsModal({
             hidden={activeTab !== "agents"}
             className="settings-tab-panel"
           >
-          <div className="roles-preview">
-            <h4>{t("settings.availableRoles", { count: roles.length })}</h4>
-            <ul>
-              {roles.map((role) => (
-                <li key={role.id}>
-                  <strong>{role.name}</strong> — {role.description}
-                </li>
-              ))}
-            </ul>
-          </div>
+          <RoleEditorPanel roles={roles} onRolesChanged={onRolesChanged} />
           </div>
           <div
             id="settings-panel-security"

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from agentforge.agents.approval_manager import approval_manager
 from agentforge.agents.orchestrator import AgentOrchestrator
+from agentforge.agents.role_registry import RoleRegistry
 from agentforge.config import settings
 from agentforge.main import app
 from agentforge.storage.conversation_store import conversation_store
@@ -98,6 +99,78 @@ def test_roles_list(api_client: TestClient) -> None:
     assert response.status_code == 200
     roles = response.json()
     assert any(role["id"] == "developer" for role in roles)
+
+
+def test_roles_crud(api_client: TestClient, temp_data_dir, monkeypatch) -> None:
+    """Custom roles can be created, updated, and deleted via API."""
+    roles_dir = temp_data_dir / "roles"
+    roles_dir.mkdir()
+    isolated_registry = RoleRegistry(roles_dir=roles_dir)
+    monkeypatch.setattr("agentforge.api.routes.role_registry", isolated_registry)
+
+    create = api_client.post(
+        "/api/roles",
+        json={
+            "id": "api_custom_role",
+            "name": "API Custom",
+            "description": "Created via API",
+            "system_prompt": "You are a custom API role.",
+        },
+    )
+    assert create.status_code == 200
+    created = create.json()
+    assert created["id"] == "api_custom_role"
+    assert created["is_builtin"] is False
+
+    duplicate = api_client.post(
+        "/api/roles",
+        json={
+            "id": "api_custom_role",
+            "name": "Duplicate",
+            "description": "Duplicate",
+            "system_prompt": "Duplicate",
+        },
+    )
+    assert duplicate.status_code == 409
+
+    update = api_client.put(
+        "/api/roles/api_custom_role",
+        json={
+            "name": "API Custom Updated",
+            "description": "Updated via API",
+            "system_prompt": "Updated prompt.",
+        },
+    )
+    assert update.status_code == 200
+    assert update.json()["name"] == "API Custom Updated"
+
+    delete = api_client.delete("/api/roles/api_custom_role")
+    assert delete.status_code == 200
+    assert delete.json()["deleted"] is True
+
+    missing = api_client.delete("/api/roles/api_custom_role")
+    assert missing.status_code == 404
+
+
+def test_roles_builtin_protected(api_client: TestClient, temp_data_dir, monkeypatch) -> None:
+    """Built-in roles cannot be updated or deleted."""
+    roles_dir = temp_data_dir / "roles"
+    roles_dir.mkdir()
+    isolated_registry = RoleRegistry(roles_dir=roles_dir)
+    monkeypatch.setattr("agentforge.api.routes.role_registry", isolated_registry)
+
+    update = api_client.put(
+        "/api/roles/developer",
+        json={
+            "name": "Hacker",
+            "description": "No",
+            "system_prompt": "No",
+        },
+    )
+    assert update.status_code == 400
+
+    delete = api_client.delete("/api/roles/developer")
+    assert delete.status_code == 400
 
 
 def test_chat_crud(api_client: TestClient) -> None:

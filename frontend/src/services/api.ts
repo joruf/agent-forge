@@ -140,6 +140,18 @@ export const api = {
       body: JSON.stringify(role),
     }),
 
+  updateRole: (
+    id: string,
+    data: Pick<AgentRole, "name" | "description" | "system_prompt">,
+  ) =>
+    request<AgentRole>(`/roles/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteRole: (id: string) =>
+    request<{ deleted: boolean }>(`/roles/${id}`, { method: "DELETE" }),
+
   listChats: () => request<Chat[]>("/chats"),
 
   createChat: (data: {

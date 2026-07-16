@@ -171,6 +171,14 @@ class RoleCreate(BaseModel):
     system_prompt: str
 
 
+class RoleUpdate(BaseModel):
+    """Custom role update payload."""
+
+    name: str
+    description: str
+    system_prompt: str
+
+
 class UserModelCreate(BaseModel):
     """Create a user-managed model entry."""
 
@@ -564,7 +572,34 @@ async def sync_ollama_models() -> dict[str, Any]:
 async def create_role(data: RoleCreate) -> AgentRole:
     """Create a custom agent role."""
     role = AgentRole(**data.model_dump(), is_builtin=False)
-    return role_registry.add_role(role)
+    try:
+        return role_registry.add_role(role)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.put("/roles/{role_id}")
+async def update_role(role_id: str, data: RoleUpdate) -> AgentRole:
+    """Update a custom agent role."""
+    role = AgentRole(**data.model_dump(), id=role_id, is_builtin=False)
+    try:
+        return role_registry.update_role(role_id, role)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Role not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/roles/{role_id}")
+async def delete_role(role_id: str) -> dict[str, bool]:
+    """Delete a custom agent role."""
+    try:
+        role_registry.delete_role(role_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Role not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"deleted": True}
 
 
 @router.get("/chats")

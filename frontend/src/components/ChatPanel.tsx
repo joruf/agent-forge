@@ -22,6 +22,7 @@ import { ApprovalPanel } from "./ApprovalPanel";
 import { ContextPluginLog } from "./ContextPluginLog";
 import { CommandHistoryModal } from "./CommandHistoryModal";
 import { TaskBoardPanel } from "./TaskBoardPanel";
+import { ExpandableText } from "./ExpandableText";
 import { DEFAULT_MULTI_ROLES, normalizeSingleRoleIds, SINGLE_AUTO_ROLE, sortSdlcRoles } from "../constants/roles";
 import { normalizeMemoryTokens } from "../constants/memory";
 import { formatMessageTimestamp } from "../utils/formatMessageTimestamp";
@@ -570,6 +571,9 @@ export function ChatPanel({
             selection?: Array<{ plugin_id: string; reason: string }>;
             routing?: { model?: string };
             success?: boolean;
+            message_id?: string;
+            prompt_corrections?: PromptCorrection[];
+            interpreted_request?: string;
             discussion?: AgentMessage;
             result?: {
               messages: Message[];
@@ -706,7 +710,12 @@ export function ChatPanel({
                 ? prev.findIndex((message) => message.id === messageId)
                 : -1;
               if (targetIndex < 0) {
-                targetIndex = prev.findLastIndex((message) => message.role === "user");
+                for (let index = prev.length - 1; index >= 0; index -= 1) {
+                  if (prev[index].role === "user") {
+                    targetIndex = index;
+                    break;
+                  }
+                }
               }
               if (targetIndex < 0) {
                 return prev;

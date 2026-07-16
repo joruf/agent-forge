@@ -556,7 +556,16 @@ When `workspace_intent.requires_tools == True`, **`_ambient_context` is cleared*
 | `security` | Security Engineer | Security review |
 | `devops` | DevOps Engineer | CI/CD, deployment |
 
-Custom roles: YAML/JSON in `assets/roles/`.
+Custom roles: YAML/JSON in `assets/roles/`. The Settings UI (**Agents** tab) lists built-in and custom roles separately. Custom roles can be created, edited, or deleted from the UI; changes are persisted as `{id}.yaml` files and loaded on the next backend start (or immediately in the running registry).
+
+**API:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/roles` | List all roles (localized built-in names) |
+| POST | `/api/roles` | Create custom role |
+| PUT | `/api/roles/{id}` | Update custom role |
+| DELETE | `/api/roles/{id}` | Delete custom role |
 
 Single mode: `resolve_single_role()` picks role from text or default `developer`.
 
@@ -639,7 +648,7 @@ Key endpoints (full list in HTML doc):
 
 - **Health/Settings:** `GET/POST /settings`, `GET /health`
 - **Setup:** `/setup/status`, `/setup/test`, `/setup/complete`, …
-- **Roles:** `GET/POST /roles`
+- **Roles:** `GET/POST/PUT/DELETE /roles`
 - **LLM:** `/llm/models`, `/llm/routing`, `/llm/registry`, …
 - **Chats:** CRUD `/chats`, messages `/chats/{id}/messages`
 - **Approvals:** `/chats/{id}/approvals`

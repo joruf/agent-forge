@@ -382,6 +382,7 @@ export default function App() {
       <SettingsModal
         settings={settings}
         roles={roles}
+        onRolesChanged={setRoles}
         theme={theme}
         locale={locale}
         open={settingsOpen}
