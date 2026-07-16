@@ -7,6 +7,7 @@ import copy
 import json
 import re
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
 
@@ -28,10 +29,12 @@ from agentforge.agents.task_state import (
     increment_weak_retry,
     MAX_REPETITION_STALLS,
     emit_task_board_update,
+    persist_task_board,
     record_tool_result_as_fact,
     seed_read_facts,
     seed_write_facts,
     seed_edit_facts,
+    seed_step_error_fact,
     MAX_WEAK_RETRIES,
 )
 from agentforge.agents.prompt_normalizer import (
@@ -55,6 +58,7 @@ from agentforge.agents.workspace_executor import (
     plan_deliverable_files,
     plan_derived_txt_from_heading,
     plan_derived_txt_from_h1,
+    list_available_headings,
     plan_write_body_from_html_source,
     prefetch_read_file_contents,
     prepare_deliverable_content,
@@ -69,6 +73,7 @@ from agentforge.memory.store import memory_store
 from agentforge.models.schemas import (
     AgentMessage,
     AgentRole,
+    AgendaResumeState,
     ApprovalResponse,
     ApprovalResumeState,
     ExecutionStrategy,
@@ -76,6 +81,7 @@ from agentforge.models.schemas import (
     MessageResponse,
     OrchestrationResponse,
     ToolCallResult,
+    UserChoiceOption,
 )
 from agentforge.storage.conversation_store import conversation_store
 from agentforge.tools.registry import ToolRegistry
@@ -461,6 +467,164 @@ class DeliverablesMixin:
         return "Applied derived file writes:\n- " + "\n- ".join(applied)
 
 
+    async def _request_content_from_heading_choice(
+        self,
+        chat_id: str,
+        on_event: Callable | None,
+        *,
+        step_index: int,
+        step_path: str,
+        requested_tag: str,
+        content_source_path: str,
+        available_tags: list[str],
+        user_content: str,
+        intent: WorkspaceIntent,
+        task_state: TaskState | None,
+        prefetched_reads: dict[str, str],
+    ) -> str:
+        """
+        Pause the agenda pipeline and ask the user how to recover.
+
+        :return: Approval request ID
+        """
+        alternates = [tag for tag in available_tags if tag != requested_tag]
+        options = self._build_content_from_heading_choice_options(
+            requested_tag,
+            alternates,
+        )
+        if alternates:
+            description = (
+                f"Could not create `{step_path}`: no `<{requested_tag}>` found in "
+                f"`{content_source_path}`. Available headings: "
+                f"{', '.join(f'<{tag}>' for tag in alternates)}."
+            )
+        else:
+            description = (
+                f"Could not create `{step_path}`: no `<{requested_tag}>` found in "
+                f"`{content_source_path}` and no alternate headings are available."
+            )
+        from agentforge.agents.user_clarification import (
+            ClarificationKind,
+            request_clarification,
+        )
+        from agentforge.models.schemas import AgendaResumeState
+
+        task_snapshot = task_state.to_persisted_payload() if task_state is not None else None
+        resume_state = AgendaResumeState(
+            chat_id=chat_id,
+            user_content=user_content,
+            intent=asdict(intent),
+            task_state_snapshot=task_snapshot,
+            step_index=step_index,
+            step_path=step_path,
+            requested_tag=requested_tag,
+            content_source_path=content_source_path,
+            prefetched_reads=dict(prefetched_reads),
+        )
+        return await request_clarification(
+            chat_id,
+            ClarificationKind.MISSING_CONTENT_TAG,
+            description,
+            options,
+            resume_state,
+            on_event,
+            allows_custom_input=False,
+        )
+
+
+    async def _resume_agenda_after_user_choice(
+        self,
+        resume_state: AgendaResumeState,
+        response: ApprovalResponse,
+        on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> MessageResponse:
+        """
+        Resume a paused workspace agenda pipeline after user choice.
+
+        :param resume_state: Saved agenda continuation state
+        :param response: User approval response with choice_id
+        :return: Assistant message summarizing resumed pipeline work
+        """
+        choice_id = (response.choice_id or "").strip()
+        if not response.approved or not choice_id:
+            choice_id = "abort"
+
+        if choice_id == "abort":
+            return await conversation_store.add_message(
+                resume_state.chat_id,
+                MessageRole.ASSISTANT,
+                "Workflow aborted at your request. Remaining agenda steps were not executed.",
+                metadata={
+                    "kind": "agenda_user_choice",
+                    "choice_id": choice_id,
+                    "step_path": resume_state.step_path,
+                },
+            )
+
+        resume_action: str | None = None
+        alternate_tag: str | None = None
+        start_index = resume_state.step_index
+        if choice_id == "skip":
+            resume_action = "skip"
+            start_index = resume_state.step_index + 1
+        elif choice_id.startswith("use_"):
+            resume_action = "use_tag"
+            alternate_tag = choice_id.removeprefix("use_")
+        else:
+            return await conversation_store.add_message(
+                resume_state.chat_id,
+                MessageRole.ASSISTANT,
+                f"Unknown choice '{choice_id}'. Workflow was not resumed.",
+                metadata={
+                    "kind": "agenda_user_choice",
+                    "choice_id": choice_id,
+                    "resume_error": True,
+                },
+            )
+
+        intent = WorkspaceIntent(**resume_state.intent)
+        task_state = build_task_state(
+            resume_state.user_content,
+            intent,
+            resume_state.task_state_snapshot,
+        )
+        summary, _reads, paused = await self._execute_workspace_agenda_pipeline(
+            resume_state.chat_id,
+            resume_state.user_content,
+            intent,
+            task_state,
+            on_event,
+            resume_state.prefetched_reads,
+            start_index=start_index,
+            resume_at_step=resume_state.step_index,
+            resume_action=resume_action,
+            resume_alternate_tag=alternate_tag,
+        )
+        await persist_task_board(resume_state.chat_id, task_state, on_event=on_event)
+        if paused:
+            pending = approval_manager.list_pending(resume_state.chat_id)
+            pending_desc = pending[0].description if pending else "Another choice is required."
+            content = (
+                "The workflow paused again while waiting for your input:\n"
+                f"{pending_desc}"
+            )
+        elif summary:
+            content = summary
+        else:
+            content = "Agenda pipeline resumed and completed with no additional actions."
+        return await conversation_store.add_message(
+            resume_state.chat_id,
+            MessageRole.ASSISTANT,
+            content,
+            metadata={
+                "kind": "agenda_user_choice",
+                "choice_id": choice_id,
+                "resumed_from_approval": True,
+                "step_path": resume_state.step_path,
+            },
+        )
+
+
     async def _execute_workspace_agenda_pipeline(
         self,
         chat_id: str,
@@ -469,7 +633,11 @@ class DeliverablesMixin:
         task_state: TaskState | None,
         on_event: Callable | None,
         prefetched_reads: dict[str, str] | None = None,
-    ) -> tuple[str, dict[str, str]]:
+        start_index: int = 0,
+        resume_at_step: int | None = None,
+        resume_action: str | None = None,
+        resume_alternate_tag: str | None = None,
+    ) -> tuple[str, dict[str, str], bool]:
         """
         Execute workspace agenda steps sequentially in plan order.
 
@@ -482,17 +650,30 @@ class DeliverablesMixin:
         :param task_state: Shared task board
         :param on_event: Optional WebSocket callback
         :param prefetched_reads: Existing read cache to update
-        :return: Tuple of summary text and updated read cache
+        :param start_index: Agenda step index to begin execution from
+        :param resume_at_step: Step index being resolved after user choice
+        :param resume_action: Recovery action (use_tag or skip)
+        :param resume_alternate_tag: Alternate heading tag when resume_action is use_tag
+        :return: Tuple of summary text, updated read cache, and paused flag
         """
         agenda = build_workspace_agenda(user_content, intent)
         if not agenda:
-            return "", prefetched_reads or {}
+            return "", prefetched_reads or {}, False
 
         reads = dict(prefetched_reads or {})
         summaries: list[str] = []
 
         async with command_audit_scope(chat_id, "system", "System", on_event):
-            for step in agenda:
+            for index, step in enumerate(agenda):
+                if index < start_index:
+                    continue
+                if (
+                    resume_at_step is not None
+                    and index == resume_at_step
+                    and resume_action == "skip"
+                ):
+                    summaries.append(f"Skipped write for `{step.path}` at your request")
+                    continue
                 if step.action == AgendaAction.CREATE_DIRECTORY and step.path:
                     target = (settings.workspace_root / step.path).resolve()
                     target.mkdir(parents=True, exist_ok=True)
@@ -501,25 +682,75 @@ class DeliverablesMixin:
 
                 if step.action == AgendaAction.WRITE_FILE and step.path:
                     if step.content_from_heading and step.content_source_path:
+                        content_tag = step.content_from_heading
+                        if (
+                            resume_at_step is not None
+                            and index == resume_at_step
+                            and resume_action == "use_tag"
+                            and resume_alternate_tag
+                        ):
+                            content_tag = resume_alternate_tag
                         success, html_content = read_workspace_file(step.content_source_path)
-                        if success:
-                            body = plan_write_body_from_html_source(
-                                html_content,
-                                step.content_from_heading,
+                        if not success:
+                            error_message = (
+                                f"Could not create `{step.path}`: failed to read "
+                                f"`{step.content_source_path}` ({html_content})"
                             )
-                            if body:
-                                write_ok, _output = await write_file_direct(step.path, body)
-                                if write_ok and task_state is not None:
-                                    seed_write_facts(
-                                        task_state,
-                                        [step.path],
-                                        source=f"content_from_{step.content_from_heading}",
-                                    )
-                                    summaries.append(
-                                        f"Created `{step.path}` with "
-                                        f"{step.content_from_heading} text from "
-                                        f"`{step.content_source_path}`",
-                                    )
+                            summaries.append(error_message)
+                            if task_state is not None:
+                                seed_step_error_fact(
+                                    task_state,
+                                    error_message,
+                                    step_path=step.path,
+                                    kind="file_write_error",
+                                )
+                            continue
+                        body = plan_write_body_from_html_source(
+                            html_content,
+                            content_tag,
+                        )
+                        if not body:
+                            tag = content_tag
+                            available_tags = list_available_headings(html_content)
+                            await self._request_content_from_heading_choice(
+                                chat_id,
+                                on_event,
+                                step_index=index,
+                                step_path=step.path,
+                                requested_tag=tag,
+                                content_source_path=step.content_source_path,
+                                available_tags=available_tags,
+                                user_content=user_content,
+                                intent=intent,
+                                task_state=task_state,
+                                prefetched_reads=reads,
+                            )
+                            await emit_task_board_update(on_event, task_state)
+                            return "", reads, True
+                        write_ok, write_output = await write_file_direct(step.path, body)
+                        if write_ok and task_state is not None:
+                            seed_write_facts(
+                                task_state,
+                                [step.path],
+                                source=f"content_from_{content_tag}",
+                            )
+                            summaries.append(
+                                f"Created `{step.path}` with "
+                                f"{content_tag} text from "
+                                f"`{step.content_source_path}`",
+                            )
+                        else:
+                            error_message = (
+                                f"Could not create `{step.path}`: {write_output}"
+                            )
+                            summaries.append(error_message)
+                            if task_state is not None:
+                                seed_step_error_fact(
+                                    task_state,
+                                    error_message,
+                                    step_path=step.path,
+                                    kind="file_write_error",
+                                )
                     elif not file_exists_in_workspace(step.path):
                         body = prepare_deliverable_content(
                             step.path,
@@ -615,6 +846,6 @@ class DeliverablesMixin:
 
         await emit_task_board_update(on_event, task_state)
         if not summaries:
-            return "", reads
-        return "Agenda pipeline:\n- " + "\n- ".join(summaries), reads
+            return "", reads, False
+        return "Agenda pipeline:\n- " + "\n- ".join(summaries), reads, False
 

@@ -6,10 +6,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from agentforge.models.schemas import (
+    AgendaResumeState,
     ApprovalRequest,
     ApprovalResponse,
     ApprovalResumeState,
+    OrchestrationResumeState,
 )
+
+ResumeState = ApprovalResumeState | AgendaResumeState | OrchestrationResumeState
 
 
 class ApprovalManager:
@@ -19,7 +23,7 @@ class ApprovalManager:
         """Initialize approval manager."""
         self._pending: dict[str, ApprovalRequest] = {}
         self._futures: dict[str, asyncio.Future] = {}
-        self._resume_states: dict[str, ApprovalResumeState] = {}
+        self._resume_states: dict[str, ResumeState] = {}
 
     async def request(
         self,
@@ -89,7 +93,7 @@ class ApprovalManager:
     def set_resume_state(
         self,
         approval_id: str,
-        state: dict[str, Any] | ApprovalResumeState,
+        state: dict[str, Any] | ApprovalResumeState | AgendaResumeState,
     ) -> None:
         """
         Store orchestration continuation state for an approval request.
@@ -97,12 +101,15 @@ class ApprovalManager:
         :param approval_id: Approval request identifier
         :param state: Serializable continuation state
         """
-        if isinstance(state, ApprovalResumeState):
+        if isinstance(state, (ApprovalResumeState, AgendaResumeState, OrchestrationResumeState)):
             self._resume_states[approval_id] = state
+            return
+        if isinstance(state, dict) and state.get("step_index") is not None:
+            self._resume_states[approval_id] = AgendaResumeState.model_validate(state)
             return
         self._resume_states[approval_id] = ApprovalResumeState.model_validate(state)
 
-    def pop_resume_state(self, approval_id: str) -> ApprovalResumeState | None:
+    def pop_resume_state(self, approval_id: str) -> ResumeState | None:
         """
         Remove and return continuation state for an approval request.
 
@@ -112,8 +119,12 @@ class ApprovalManager:
         state = self._resume_states.pop(approval_id, None)
         if state is None:
             return None
-        if isinstance(state, ApprovalResumeState):
+        if isinstance(state, (ApprovalResumeState, AgendaResumeState, OrchestrationResumeState)):
             return state
+        if isinstance(state, dict) and state.get("kind") and state.get("step_index") is None:
+            return OrchestrationResumeState.model_validate(state)
+        if isinstance(state, dict) and state.get("step_index") is not None:
+            return AgendaResumeState.model_validate(state)
         try:
             return ApprovalResumeState.model_validate(state)
         except Exception as exc:

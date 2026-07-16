@@ -215,12 +215,17 @@ export const api = {
     approvalId: string,
     approved: boolean,
     comment = "",
+    choiceId?: string,
   ) =>
     request<{ approved: boolean }>(
       `/chats/${chatId}/approvals/${approvalId}`,
       {
         method: "POST",
-        body: JSON.stringify({ approved, comment }),
+        body: JSON.stringify({
+          approved,
+          comment,
+          ...(choiceId ? { choice_id: choiceId } : {}),
+        }),
       },
     ),
 

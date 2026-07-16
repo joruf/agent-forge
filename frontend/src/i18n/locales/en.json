@@ -245,6 +245,21 @@
     "approve": "Allow",
     "deny": "Deny"
   },
+  "userChoice": {
+    "title": "Your input needed",
+    "dismiss": "Dismiss",
+    "customInputLabel": "Your answer",
+    "customInputPlaceholder": "Type your clarification or instruction…",
+    "customSubmit": "Submit answer",
+    "customCancel": "Back to options",
+    "titles": {
+      "missingContentTag": "Missing content source",
+      "agentBlocked": "Agent needs help",
+      "agentQuestion": "Agent question",
+      "workflowIncomplete": "Workflow incomplete",
+      "generic": "Clarification needed"
+    }
+  },
   "agentHistory": {
     "empty": "No agent discussions yet.",
     "title": "Agent history",

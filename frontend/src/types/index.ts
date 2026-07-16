@@ -92,6 +92,12 @@ export interface ApprovalRequest {
   created_at: string;
 }
 
+export interface UserChoiceOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
 export interface AppSettings {
   workspace_root: string;
   ollama_base_url: string;

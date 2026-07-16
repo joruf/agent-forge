@@ -134,6 +134,24 @@ def _test12_workflow_with_h3_insert_derived_and_1txt_prompt(
     )
 
 
+def _test12_workflow_with_h3_derived_1txt_and_fitxt_prompt(
+    workspace: Path,
+    *,
+    wrong_paths: bool = True,
+) -> str:
+    """
+    Build the eight-step Test12 workflow including fi.txt from H2 text.
+
+    :param workspace: Temp workspace root
+    :param wrong_paths: Use GitHub/index.html instead of GitHub/Test12/index.html
+    :return: User prompt text
+    """
+    return (
+        f"{_test12_workflow_with_h3_insert_derived_and_1txt_prompt(workspace, wrong_paths=wrong_paths)}\n"
+        "erstelle danach die txt datei fi.txt und schreibe den text vom H2 Tag des HTML Datei rein"
+    )
+
+
 @pytest.mark.asyncio
 async def test_seven_step_workflow_creates_h3_named_txt_and_1txt(
     monkeypatch,
@@ -421,6 +439,229 @@ async def test_workflow_weak_agents_still_apply_agenda_edit(
         encoding="utf-8",
     )
     assert "Hello Bot" in content
+
+
+@pytest.mark.asyncio
+async def test_agenda_pipeline_pauses_for_missing_h2_with_alternate_headings(
+    monkeypatch,
+    temp_workspace: Path,
+) -> None:
+    """Missing requested heading pauses with user-choice options when alternates exist."""
+    from agentforge.agents.approval_manager import approval_manager
+    from agentforge.agents.orchestrator import AgentOrchestrator
+    from agentforge.agents.task_state import build_task_state
+    from agentforge.agents.workspace_intent import detect_workspace_intent
+    from tests.helpers.orchestration_test_helpers import write_workspace_file
+
+    write_workspace_file(
+        temp_workspace,
+        "GitHub/Test12/index.html",
+        "<html><body><h1>Hello World</h1><h3>Hello Bot</h3></body></html>",
+    )
+
+    prompt = _test12_workflow_with_h3_derived_1txt_and_fitxt_prompt(
+        temp_workspace,
+        wrong_paths=True,
+    )
+    intent = detect_workspace_intent(normalize_user_prompt(prompt).normalized)
+    task_state = build_task_state(prompt, intent)
+    orchestrator = AgentOrchestrator()
+
+    summary, _reads, paused = await orchestrator._execute_workspace_agenda_pipeline(
+        "pipeline-test",
+        prompt,
+        intent,
+        task_state,
+        None,
+    )
+
+    assert paused is True
+    assert summary == ""
+    assert not (temp_workspace / "GitHub" / "Test12" / "fi.txt").exists()
+    pending = approval_manager.list_pending("pipeline-test")
+    assert len(pending) == 1
+    assert pending[0].action_type == "user_choice"
+    assert "no `<h2>` found" in pending[0].description
+    option_ids = [option["id"] for option in pending[0].payload["options"]]
+    assert "use_h1" in option_ids
+    assert "use_h3" in option_ids
+    assert "skip" in option_ids
+    assert "abort" in option_ids
+    error_facts = [fact for fact in task_state.facts if fact.kind == "file_write_error"]
+    assert not error_facts
+
+
+@pytest.mark.asyncio
+async def test_agenda_pipeline_resume_uses_alternate_heading(
+    monkeypatch,
+    temp_workspace: Path,
+) -> None:
+    """User choice to use an alternate heading resumes the write step."""
+    from agentforge.agents.approval_manager import approval_manager
+    from agentforge.agents.orchestrator import AgentOrchestrator
+    from agentforge.agents.task_state import (
+        build_task_board_ui_payload,
+        build_task_state,
+        load_task_board_memory,
+    )
+    from agentforge.agents.workspace_intent import detect_workspace_intent
+    from agentforge.models.schemas import ApprovalResponse
+    from tests.helpers.orchestration_test_helpers import write_workspace_file
+
+    write_workspace_file(
+        temp_workspace,
+        "GitHub/Test12/index.html",
+        "<html><body><h1>Hello World</h1><h3>Hello Bot</h3></body></html>",
+    )
+
+    prompt = _test12_workflow_with_h3_derived_1txt_and_fitxt_prompt(
+        temp_workspace,
+        wrong_paths=True,
+    )
+    intent = detect_workspace_intent(normalize_user_prompt(prompt).normalized)
+    task_state = build_task_state(prompt, intent)
+    orchestrator = AgentOrchestrator()
+
+    _summary, _reads, paused = await orchestrator._execute_workspace_agenda_pipeline(
+        "pipeline-resume-test",
+        prompt,
+        intent,
+        task_state,
+        None,
+    )
+    assert paused is True
+    pending = approval_manager.list_pending("pipeline-resume-test")
+    assert pending
+
+    message = await orchestrator.execute_approved_command(
+        "pipeline-resume-test",
+        pending[0].id,
+        ApprovalResponse(approved=True, choice_id="use_h3"),
+    )
+    assert message is not None
+    assert "Created `GitHub/Test12/fi.txt`" in message.content
+    assert (temp_workspace / "GitHub" / "Test12" / "fi.txt").read_text(
+        encoding="utf-8",
+    ) == "Hello Bot\n"
+    assert approval_manager.list_pending("pipeline-resume-test") == []
+
+    board = await load_task_board_memory("pipeline-resume-test")
+    assert board is not None
+    refreshed_state = build_task_state(prompt, intent, board)
+    payload = build_task_board_ui_payload(refreshed_state)
+    fi_step = next(
+        step for step in payload["steps"]
+        if step.get("path") == "GitHub/Test12/fi.txt"
+    )
+    assert fi_step["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_agenda_pipeline_reports_missing_h2_for_content_from_heading(
+    monkeypatch,
+    temp_workspace: Path,
+) -> None:
+    """Missing h2 still offers recovery when other headings exist in the source HTML."""
+    from agentforge.agents.orchestrator import AgentOrchestrator
+    from agentforge.agents.task_state import build_task_state
+    from agentforge.agents.workspace_intent import detect_workspace_intent
+    from tests.helpers.orchestration_test_helpers import write_workspace_file
+
+    write_workspace_file(
+        temp_workspace,
+        "GitHub/Test12/index.html",
+        "<html><body><h1>Hello World</h1><h3>Hello Bot</h3></body></html>",
+    )
+
+    prompt = _test12_workflow_with_h3_derived_1txt_and_fitxt_prompt(
+        temp_workspace,
+        wrong_paths=True,
+    )
+    intent = detect_workspace_intent(normalize_user_prompt(prompt).normalized)
+    task_state = build_task_state(prompt, intent)
+    orchestrator = AgentOrchestrator()
+
+    summary, _reads, paused = await orchestrator._execute_workspace_agenda_pipeline(
+        "pipeline-test",
+        prompt,
+        intent,
+        task_state,
+        None,
+    )
+
+    assert paused is True
+    from agentforge.agents.approval_manager import approval_manager
+
+    pending = approval_manager.list_pending("pipeline-test")
+    assert pending
+    option_ids = [option["id"] for option in pending[0].payload["options"]]
+    assert "use_h1" in option_ids
+    assert "use_h3" in option_ids
+    assert "skip" in option_ids
+    assert "abort" in option_ids
+    assert summary == ""
+    assert not (temp_workspace / "GitHub" / "Test12" / "fi.txt").exists()
+
+
+def test_build_content_from_heading_choice_options_without_alternates() -> None:
+    """When no alternate headings exist, only skip and abort are offered."""
+    from agentforge.agents.orchestrator import AgentOrchestrator
+
+    orchestrator = AgentOrchestrator()
+    options = orchestrator._build_content_from_heading_choice_options("h2", [])
+    assert [option.id for option in options] == ["skip", "abort"]
+
+
+@pytest.mark.asyncio
+async def test_eight_step_workflow_missing_h2_skips_endless_multi_agent_discussion(
+    monkeypatch,
+    temp_workspace: Path,
+) -> None:
+    """Missing H2 for fi.txt pauses for user choice without multi-round agent chatter."""
+    (temp_workspace / "GitHub").mkdir()
+    prompt = _test12_workflow_with_h3_derived_1txt_and_fitxt_prompt(
+        temp_workspace,
+        wrong_paths=True,
+    )
+    captured: dict[str, list] = {}
+    weak = '{"status": "success"}'
+
+    result = await run_orchestration(
+        monkeypatch,
+        temp_workspace,
+        prompt,
+        role_ids=["developer", "reviewer", "project_manager"],
+        agent_loop=make_team_loop(
+            role_responses={
+                "developer": weak,
+                "reviewer": weak,
+                "project_manager": weak,
+            },
+            capture=captured,
+        ),
+    )
+
+    html_path = temp_workspace / "GitHub" / "Test12" / "index.html"
+    derived_txt = temp_workspace / "GitHub" / "Test12" / "Hello Bot.txt"
+    explicit_txt = temp_workspace / "GitHub" / "Test12" / "1.txt"
+    fi_txt = temp_workspace / "GitHub" / "Test12" / "fi.txt"
+
+    assert html_path.is_file()
+    assert derived_txt.is_file()
+    assert explicit_txt.is_file()
+    assert not fi_txt.exists()
+
+    assert result.pending_approvals
+    pending = result.pending_approvals[0]
+    assert pending.action_type == "user_choice"
+    assert "no `<h2>` found" in pending.description
+    assert "GitHub/Test12/fi.txt" in pending.description
+    assert "GitHub/Test12/index.html" in pending.description
+
+    reviewer_turns = len(captured.get("reviewer", []))
+    pm_turns = len(captured.get("project_manager", []))
+    assert reviewer_turns <= 1
+    assert pm_turns <= 1
 
 
 @pytest.mark.asyncio

@@ -49,6 +49,11 @@ SEVEN_STEP_H3_AND_1TXT_PROMPT = (
     "erstelle danach die txt datei 1.txt und schreibe den text vom H1 Tag des HTML Datei rein"
 )
 
+EIGHT_STEP_H3_1TXT_FITXT_PROMPT = (
+    f"{SEVEN_STEP_H3_AND_1TXT_PROMPT}\n"
+    "erstelle danach die txt datei fi.txt und schreibe den text vom H2 Tag des HTML Datei rein"
+)
+
 
 def test_split_into_clauses_preserves_order() -> None:
     """Temporal markers and newlines produce ordered clauses."""
@@ -134,3 +139,16 @@ def test_seven_step_prompt_with_explicit_1txt_and_h3_derived() -> None:
     assert len(write_steps) == 2
     assert write_steps[0].path == "GitHub/Test12/index.html"
     assert write_steps[1].path == "GitHub/Test12/1.txt"
+
+
+def test_eight_step_prompt_with_fi_txt_from_h2() -> None:
+    """Eight-step workflow adds fi.txt populated from H2 heading text."""
+    intent = detect_workspace_intent(EIGHT_STEP_H3_1TXT_FITXT_PROMPT)
+    agenda = build_workspace_agenda(EIGHT_STEP_H3_1TXT_FITXT_PROMPT, intent)
+
+    assert len(agenda) == 7
+    assert agenda[5].path == "GitHub/Test12/1.txt"
+    assert agenda[5].content_from_heading == "h1"
+    assert agenda[6].path == "GitHub/Test12/fi.txt"
+    assert agenda[6].content_from_heading == "h2"
+    assert agenda[6].content_source_path == "GitHub/Test12/index.html"

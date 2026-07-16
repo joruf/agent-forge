@@ -135,6 +135,23 @@ def resolve_write_path(
     return filename
 
 
+def list_available_headings(html_content: str) -> list[str]:
+    """
+    List heading tag names (h1-h6) that contain extractable text in HTML.
+
+    :param html_content: HTML document body
+    :return: Ordered unique heading tag names present in the document
+    """
+    tags: list[str] = []
+    seen: set[str] = set()
+    for level in range(1, 7):
+        tag = f"h{level}"
+        if extract_tag_text_from_html(html_content, tag) and tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+    return tags
+
+
 def plan_write_body_from_html_source(html_content: str, tag_name: str) -> str | None:
     """
     Build a text file body from one HTML element inside HTML content.

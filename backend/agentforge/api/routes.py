@@ -703,8 +703,17 @@ async def list_approvals(chat_id: str):
 @router.post("/chats/{chat_id}/approvals/{approval_id}")
 async def respond_approval(chat_id: str, approval_id: str, data: ApprovalResponse):
     """Approve or deny a pending action."""
+
+    async def broadcast_event(event: dict[str, Any]) -> None:
+        await _broadcast_chat_event(chat_id, event)
+
     orchestrator = AgentOrchestrator()
-    msg = await orchestrator.execute_approved_command(chat_id, approval_id, data)
+    msg = await orchestrator.execute_approved_command(
+        chat_id,
+        approval_id,
+        data,
+        on_event=broadcast_event,
+    )
     await _broadcast_chat_event(
         chat_id,
         {

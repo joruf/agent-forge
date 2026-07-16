@@ -497,3 +497,73 @@ def test_approval_response_broadcasts_resumed_message_event(
         assert event["message"]["role"] == "assistant"
         assert event["message"]["content"] == "WS resumed output."
         assert event["message"]["metadata"]["resumed_from_approval"] is True
+
+
+def test_user_choice_approval_resumes_agenda_pipeline(
+    api_client: TestClient,
+    monkeypatch,
+) -> None:
+    """User-choice approval resumes the workspace agenda pipeline."""
+
+    async def fake_resume(self, resume_state, response, on_event=None):
+        from agentforge.models.schemas import MessageRole
+        from agentforge.storage.conversation_store import conversation_store
+
+        return await conversation_store.add_message(
+            resume_state.chat_id,
+            MessageRole.ASSISTANT,
+            "Agenda pipeline:\n- Created `demo.txt` with h3 text from `index.html`",
+            metadata={"kind": "agenda_user_choice", "choice_id": response.choice_id},
+        )
+
+    monkeypatch.setattr(AgentOrchestrator, "_resume_agenda_after_user_choice", fake_resume)
+
+    create = api_client.post(
+        "/api/chats",
+        json={"title": "User Choice", "mode": "multi", "role_ids": ["developer"]},
+    )
+    assert create.status_code == 200
+    chat_id = create.json()["id"]
+
+    approval_id = asyncio.run(
+        approval_manager.request(
+            chat_id,
+            "user_choice",
+            "Could not create `demo.txt`: no `<h2>` found in `index.html`.",
+            {
+                "question": "Could not create `demo.txt`: no `<h2>` found in `index.html`.",
+                "options": [
+                    {"id": "use_h3", "label": "Use <h3> instead", "description": ""},
+                    {"id": "skip", "label": "Skip this write step", "description": ""},
+                    {"id": "abort", "label": "Abort remaining workflow", "description": ""},
+                ],
+                "context": {},
+            },
+        )
+    )
+    approval_manager.set_resume_state(
+        approval_id,
+        {
+            "chat_id": chat_id,
+            "user_content": "Create demo.txt from h2 in index.html",
+            "intent": {"wants_file_creation": True, "target_paths": ["demo.txt"]},
+            "task_state_snapshot": None,
+            "step_index": 2,
+            "step_path": "demo.txt",
+            "requested_tag": "h2",
+            "content_source_path": "index.html",
+            "prefetched_reads": {},
+        },
+    )
+
+    response = api_client.post(
+        f"/api/chats/{chat_id}/approvals/{approval_id}",
+        json={"approved": True, "choice_id": "use_h3"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["approved"] is True
+    assert payload["message"]["metadata"]["kind"] == "agenda_user_choice"
+    assert payload["message"]["metadata"]["choice_id"] == "use_h3"
+    assert approval_manager.list_pending(chat_id) == []
+

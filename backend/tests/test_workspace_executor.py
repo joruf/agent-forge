@@ -20,6 +20,7 @@ from agentforge.agents.workspace_executor import (
     plan_derived_txt_from_h1,
     plan_derived_txt_from_heading,
     plan_write_body_from_html_source,
+    list_available_headings,
     resolve_write_path,
     sanitize_filename_from_text,
     strip_code_fences,
@@ -224,3 +225,11 @@ def test_plan_write_body_from_html_source() -> None:
     """HTML heading text becomes a plain-text file body."""
     html = "<html><body><h1>Hello World</h1><h3>Hello Bot</h3></body></html>"
     assert plan_write_body_from_html_source(html, "h1") == "Hello World\n"
+    assert plan_write_body_from_html_source(html, "h2") is None
+
+
+def test_list_available_headings() -> None:
+    """Available headings lists only tags with extractable text."""
+    html = "<html><body><h1>Hello World</h1><h3>Hello Bot</h3></body></html>"
+    assert list_available_headings(html) == ["h1", "h3"]
+    assert list_available_headings("<html><body><p>No headings</p></body></html>") == []

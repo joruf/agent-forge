@@ -19,7 +19,10 @@ from agentforge.agents.task_state import (
     format_task_board_block,
     increment_weak_retry,
     record_tool_result_as_fact,
+    seed_edit_facts,
     seed_read_facts,
+    seed_step_error_fact,
+    seed_write_facts,
 )
 from agentforge.agents.workspace_intent import detect_workspace_intent
 from agentforge.config import settings
@@ -225,3 +228,59 @@ def test_build_task_board_ui_payload_marks_completed_read_step() -> None:
     assert payload["steps"]
     assert any(step["status"] == "done" for step in payload["steps"])
     assert payload["complete"] is True
+
+
+SEVEN_STEP_H3_AND_1TXT_PROMPT = (
+    "erstelle mir Verzeichnis mit dem Namen Test12\n"
+    "im Ordner GitHub\n"
+    "dort eine Datei mit dem Namen index.html erstellen\n"
+    'darin fügst du in html code den text "Hello World" als H1-Tag hinzu.\n'
+    "lese danach die Datei GitHub/index.html aus und geb den Inhalt hier im Prompt aus.\n"
+    "erstelle danach in der datei GitHub/index.html unter dem H1 Tag einen H3 Tag "
+    'mit der Beschriftung "Hello Bot".\n'
+    "erstelle danach eine neue datei. Die Datei hat den Namen des Inhalts des "
+    "H3-Tag der erstellten HTML-Datei und hat die Dateiendung .txt\n"
+    "erstelle danach die txt datei 1.txt und schreibe den text vom H1 Tag des HTML Datei rein"
+)
+
+EIGHT_STEP_H3_1TXT_FITXT_PROMPT = (
+    f"{SEVEN_STEP_H3_AND_1TXT_PROMPT}\n"
+    "erstelle danach die txt datei fi.txt und schreibe den text vom H2 Tag des HTML Datei rein"
+)
+
+
+def test_seed_step_error_fact_surfaces_in_workflow_final_response() -> None:
+    """Step errors appear in workflow final responses and completion checks."""
+    intent = detect_workspace_intent(EIGHT_STEP_H3_1TXT_FITXT_PROMPT)
+    state = build_task_state(EIGHT_STEP_H3_1TXT_FITXT_PROMPT, intent)
+    seed_write_facts(state, ["GitHub/Test12/index.html"])
+    seed_write_facts(state, ["GitHub/Test12/Hello Bot.txt"])
+    seed_write_facts(state, ["GitHub/Test12/1.txt"])
+    seed_read_facts(
+        state,
+        {"GitHub/Test12/index.html": "<h1>Hello World</h1><h3>Hello Bot</h3>"},
+    )
+    seed_edit_facts(
+        state,
+        "GitHub/Test12/index.html",
+        replace_from="",
+        replace_to="Hello Bot",
+    )
+    error_message = (
+        "Could not create `GitHub/Test12/fi.txt`: no `<h2>` found in "
+        "`GitHub/Test12/index.html`"
+    )
+    seed_step_error_fact(
+        state,
+        error_message,
+        step_path="GitHub/Test12/fi.txt",
+        kind="file_write_error",
+    )
+
+    final = build_final_response_from_task_state(state)
+    assert "Workflow step errors:" in final
+    assert error_message in final
+
+    report = check_completion(state)
+    assert report.complete is False
+    assert "no `<h2>` found" in report.reason

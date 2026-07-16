@@ -7,10 +7,16 @@ import copy
 import json
 import re
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
 
 from agentforge.agents.approval_manager import approval_manager
+from agentforge.agents.user_clarification import (
+    ClarificationKind,
+    clarification_pending_marker,
+    request_clarification,
+)
 from agentforge.agents.role_registry import role_registry
 from agentforge.agents.role_router import resolve_single_role
 from agentforge.agents.task_state import (
@@ -67,6 +73,7 @@ from agentforge.models.schemas import (
     MessageRole,
     MessageResponse,
     OrchestrationResponse,
+    OrchestrationResumeState,
     ToolCallResult,
 )
 from agentforge.storage.conversation_store import conversation_store
@@ -275,14 +282,36 @@ class ToolLoopMixin:
                         and task_state.weak_retry_counts.get(role_id, 0) >= MAX_WEAK_RETRIES
                     ):
                         completion = check_completion(task_state)
-                        return (
-                            "[ASK_USER] "
-                            + build_escalation_message(
-                                task_state,
-                                role_id,
-                                reason=completion.reason,
-                            )
-                        ), routing
+                        question = build_escalation_message(
+                            task_state,
+                            role_id,
+                            reason=completion.reason,
+                        )
+                        resume_state = OrchestrationResumeState(
+                            kind=ClarificationKind.AGENT_BLOCKED.value,
+                            chat_id=chat_id,
+                            user_content=user_content,
+                            context={
+                                "role_id": role_id,
+                                "reason": completion.reason,
+                                "missing": completion.missing,
+                            },
+                            task_state_snapshot=task_state.to_persisted_payload(),
+                            intent=asdict(intent),
+                            source_role_id=role_id,
+                            source_role_name=agent_name,
+                            question_text=question,
+                            mode="single" if mode_single else "multi",
+                        )
+                        await request_clarification(
+                            chat_id,
+                            ClarificationKind.AGENT_BLOCKED,
+                            question,
+                            None,
+                            resume_state,
+                            on_event,
+                        )
+                        return clarification_pending_marker(), routing
                     return finalized, routing
 
                 assistant_msg: dict[str, Any] = {
@@ -600,10 +629,50 @@ class ToolLoopMixin:
         chat_id: str,
         approval_id: str,
         response: ApprovalResponse,
+        on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> MessageResponse | None:
-        """Execute a previously approved shell command."""
+        """Execute a previously approved shell command or resume a user choice."""
         pending = approval_manager.list_pending(chat_id)
         target = next((p for p in pending if p.id == approval_id), None)
+        if target and target.action_type == "user_choice":
+            await approval_manager.respond(approval_id, response)
+            try:
+                resume_state = approval_manager.pop_resume_state(approval_id)
+            except ValueError:
+                return await conversation_store.add_message(
+                    chat_id,
+                    MessageRole.ASSISTANT,
+                    (
+                        "Your choice was recorded, but I could not resume the workflow because "
+                        "the continuation state is invalid. Please resend your last request."
+                    ),
+                    metadata={
+                        "approval_id": approval_id,
+                        "resume_error": True,
+                        "resume_error_type": "invalid_state",
+                    },
+                )
+            if not resume_state:
+                return None
+            from agentforge.models.schemas import AgendaResumeState
+
+            if isinstance(resume_state, AgendaResumeState):
+                return await self._resume_agenda_after_user_choice(
+                    resume_state,
+                    response,
+                    on_event=on_event,
+                )
+            if isinstance(resume_state, OrchestrationResumeState):
+                return await self._resume_orchestration_after_clarification(
+                    resume_state,
+                    response,
+                )
+            return await conversation_store.add_message(
+                chat_id,
+                MessageRole.ASSISTANT,
+                "Your choice was recorded, but no agenda continuation state was available.",
+                metadata={"approval_id": approval_id, "resume_error": True},
+            )
         if not target or not response.approved:
             if target and target.action_type == "command":
                 command = str(target.payload.get("command", "")).strip()

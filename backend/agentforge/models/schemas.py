@@ -168,6 +168,15 @@ class ApprovalResponse(BaseModel):
 
     approved: bool
     comment: str = ""
+    choice_id: str | None = None
+
+
+class UserChoiceOption(BaseModel):
+    """One selectable option in a user-choice dialog."""
+
+    id: str
+    label: str
+    description: str = ""
 
 
 class ApprovalResumeState(BaseModel):
@@ -183,6 +192,37 @@ class ApprovalResumeState(BaseModel):
     routing: dict[str, Any] = Field(default_factory=dict)
     messages: list[dict[str, Any]] = Field(default_factory=list)
     tool_call_id: str
+
+
+class AgendaResumeState(BaseModel):
+    """Continuation state for resuming a workspace agenda pipeline."""
+
+    chat_id: str
+    user_content: str
+    intent: dict[str, Any]
+    task_state_snapshot: dict[str, Any] | None = None
+    step_index: int
+    step_path: str
+    requested_tag: str
+    content_source_path: str
+    prefetched_reads: dict[str, str] = Field(default_factory=dict)
+
+
+class OrchestrationResumeState(BaseModel):
+    """Continuation state for resuming orchestration after user clarification."""
+
+    kind: str
+    chat_id: str
+    user_content: str
+    context: dict[str, Any] = Field(default_factory=dict)
+    task_state_snapshot: dict[str, Any] | None = None
+    intent: dict[str, Any] | None = None
+    mode: str = "multi"
+    role_ids: list[str] = Field(default_factory=list)
+    effective_strategy: str = "auto"
+    source_role_id: str = ""
+    source_role_name: str = ""
+    question_text: str = ""
 
 
 class CommandRequest(BaseModel):

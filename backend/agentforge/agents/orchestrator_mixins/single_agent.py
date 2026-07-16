@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
 
 from agentforge.agents.approval_manager import approval_manager
+from agentforge.agents.user_clarification import is_clarification_pending
 from agentforge.agents.role_registry import role_registry
 from agentforge.agents.role_router import resolve_single_role
 from agentforge.agents.task_state import (
@@ -65,6 +66,7 @@ from agentforge.models.schemas import (
     ExecutionStrategy,
     MessageRole,
     MessageResponse,
+    OrchestrationMode,
     OrchestrationResponse,
     ToolCallResult,
 )
@@ -165,6 +167,28 @@ class SingleAgentMixin:
         )
         await self._emit_agent_end(on_event, role_id, role.name, round_num=1)
 
+        if is_clarification_pending(content):
+            return await self._build_clarification_pause_response(
+                chat_id,
+                effective_strategy,
+            )
+
+        if content.startswith("[ASK_USER]"):
+            return await self._build_user_input_response(
+                chat_id=chat_id,
+                role=role,
+                content=content,
+                outputs=[],
+                discussions=discussions,
+                effective_strategy=effective_strategy,
+                user_content=user_content,
+                task_state=task_state,
+                workspace_intent=workspace_intent,
+                on_event=on_event,
+                role_ids=role_ids,
+                mode=OrchestrationMode.SINGLE,
+            )
+
         still_missing = missing_requested_files(user_content, workspace_intent)
         if still_missing and workspace_intent.wants_file_creation:
             fallback = await self._guarantee_workspace_deliverables(
@@ -205,7 +229,7 @@ class SingleAgentMixin:
             if fallback and self._is_weak_discussion_content(content):
                 content = fallback
         if workspace_intent.wants_file_creation and workspace_intent.wants_file_read:
-            pipeline_summary, refreshed = await self._execute_workspace_agenda_pipeline(
+            pipeline_summary, refreshed, pipeline_paused = await self._execute_workspace_agenda_pipeline(
                 chat_id,
                 user_content,
                 workspace_intent,
@@ -213,6 +237,13 @@ class SingleAgentMixin:
                 on_event,
                 prefetched_reads,
             )
+            if pipeline_paused:
+                return OrchestrationResponse(
+                    chat_id=chat_id,
+                    messages=[],
+                    agent_discussions=[],
+                    pending_approvals=approval_manager.list_pending(chat_id),
+                )
             if pipeline_summary and on_event:
                 await on_event({"type": "agent_message", "content": pipeline_summary})
             read_summary = build_final_response_from_task_state(task_state)

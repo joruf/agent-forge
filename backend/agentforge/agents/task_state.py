@@ -428,6 +428,43 @@ def seed_write_facts(
         )
 
 
+def seed_step_error_fact(
+    task_state: TaskState,
+    message: str,
+    *,
+    step_path: str | None = None,
+    kind: str = "step_error",
+    agent_id: str = "system",
+    round_num: int = 0,
+    source: str = "agenda_pipeline",
+) -> None:
+    """
+    Record a failed deterministic agenda step on the shared task board.
+
+    :param task_state: Active task board
+    :param message: Human-readable error summary
+    :param step_path: Workspace-relative target path when known
+    :param kind: Fact kind label such as step_error or file_write_error
+    :param agent_id: Agent or subsystem that attempted the step
+    :param round_num: Orchestration round index
+    :param source: Fact source label
+    """
+    if not message.strip():
+        return
+    task_state.add_fact(
+        TaskFact(
+            id=f"fact_{uuid.uuid4().hex[:10]}",
+            source=source,
+            kind=kind,
+            path=step_path,
+            content=message.strip(),
+            verified=False,
+            agent_id=agent_id,
+            round_num=round_num,
+        )
+    )
+
+
 def seed_edit_facts(
     task_state: TaskState,
     relative_path: str,
@@ -566,6 +603,19 @@ def record_tool_result_as_fact(
             round_num=round_num,
         )
     )
+
+
+def _first_step_error_reason(task_state: TaskState) -> str | None:
+    """
+    Return the most recent recorded step error message when present.
+
+    :param task_state: Active task board
+    :return: Error summary or None
+    """
+    for fact in reversed(task_state.facts):
+        if fact.kind in {"step_error", "file_write_error"} and fact.content.strip():
+            return fact.content.strip()
+    return None
 
 
 def check_completion(task_state: TaskState) -> CompletionReport:
@@ -712,9 +762,24 @@ def check_completion(task_state: TaskState) -> CompletionReport:
             target for target in file_targets if target not in written
         ]
         if missing_writes:
+            step_errors = {
+                fact.path: fact.content
+                for fact in task_state.facts
+                if fact.kind in {"step_error", "file_write_error"} and fact.path
+            }
+            reason = _first_step_error_reason(task_state) or (
+                "Missing verified writes before read-back"
+            )
+            error_details = [
+                step_errors[path]
+                for path in missing_writes
+                if path in step_errors
+            ]
+            if error_details and not _first_step_error_reason(task_state):
+                reason = error_details[0]
             return CompletionReport(
                 complete=False,
-                reason="Missing verified writes before read-back",
+                reason=reason,
                 missing=missing_writes,
             )
         read_paths = [
@@ -785,12 +850,23 @@ def check_completion(task_state: TaskState) -> CompletionReport:
         ]
         for step in content_write_steps:
             if step.path not in written:
+                reason = (
+                    f"Missing content-source write for "
+                    f"{step.content_from_heading} in `{step.path}`"
+                )
+                step_errors = {
+                    fact.path: fact.content
+                    for fact in task_state.facts
+                    if fact.kind in {"step_error", "file_write_error"} and fact.path
+                }
+                step_error_reason = _first_step_error_reason(task_state)
+                if step.path in step_errors:
+                    reason = step_errors[step.path]
+                elif step_error_reason:
+                    reason = step_error_reason
                 return CompletionReport(
                     complete=False,
-                    reason=(
-                        f"Missing content-source write for "
-                        f"{step.content_from_heading} in `{step.path}`"
-                    ),
+                    reason=reason,
                     missing=[step.path],
                 )
         return CompletionReport(complete=True)
@@ -1213,6 +1289,16 @@ def build_final_response_from_task_state(task_state: TaskState) -> str:
                 write_lines.append(f"- {fact.path}")
         if write_lines:
             blocks.append("Created or updated files:\n" + "\n".join(write_lines))
+        step_errors = [
+            fact
+            for fact in task_state.facts
+            if fact.kind in {"step_error", "file_write_error"} and fact.content.strip()
+        ]
+        if step_errors:
+            error_lines = ["Workflow step errors:"]
+            for fact in step_errors:
+                error_lines.append(f"- {fact.content}")
+            blocks.append("\n".join(error_lines))
         if blocks:
             return "\n\n".join(blocks)
 

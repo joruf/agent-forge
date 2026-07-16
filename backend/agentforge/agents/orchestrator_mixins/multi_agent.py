@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
 
 from agentforge.agents.approval_manager import approval_manager
+from agentforge.agents.user_clarification import ClarificationKind, is_clarification_pending
 from agentforge.agents.role_registry import role_registry
 from agentforge.agents.role_router import resolve_single_role
 from agentforge.agents.task_state import (
@@ -37,7 +38,11 @@ from agentforge.agents.prompt_normalizer import (
     PromptNormalizationResult,
     format_prompt_normalization_block,
 )
-from agentforge.agents.compound_planner import build_compound_plan, format_compound_plan_block
+from agentforge.agents.compound_planner import (
+    build_compound_plan,
+    format_compound_plan_block,
+    is_compound_request,
+)
 from agentforge.agents.workspace_agenda import AgendaAction, build_workspace_agenda
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.agents.workspace_executor import (
@@ -374,6 +379,20 @@ class MultiAgentMixin:
             round_num=round_num,
             mode_multi=True,
         )
+        if is_clarification_pending(content):
+            await self._emit_agent_end(
+                on_event,
+                role.id,
+                role.name,
+                round_num=round_num + 1,
+            )
+            discussion = AgentMessage(
+                from_agent=role.name,
+                to_agent="team",
+                content=content,
+                timestamp=datetime.now(timezone.utc),
+            )
+            return content, routing, discussion
         if (
             task_state
             and intent.requires_tools
@@ -473,7 +492,7 @@ class MultiAgentMixin:
             task_state=task_state,
         )
         developer_impl_done = impl_discussion is not None
-        pipeline_summary, prefetched_reads = await self._execute_workspace_agenda_pipeline(
+        pipeline_summary, prefetched_reads, pipeline_paused = await self._execute_workspace_agenda_pipeline(
             chat_id,
             user_content,
             workspace_intent,
@@ -481,6 +500,14 @@ class MultiAgentMixin:
             on_event,
             prefetched_reads,
         )
+        if pipeline_paused:
+            return OrchestrationResponse(
+                chat_id=chat_id,
+                messages=outputs,
+                agent_discussions=discussions,
+                pending_approvals=approval_manager.list_pending(chat_id),
+                effective_execution_strategy=effective_strategy,
+            )
         if pipeline_summary:
             transcript.append(f"System: {pipeline_summary}")
         compound_block = format_compound_plan_block(
@@ -488,6 +515,17 @@ class MultiAgentMixin:
         )
         if compound_block:
             transcript.append(compound_block)
+
+        agenda = build_workspace_agenda(user_content, workspace_intent)
+        skip_discussion_loop = (
+            task_state.task_type == WorkspaceTaskType.WORKFLOW
+            and (len(agenda) >= 2 or is_compound_request(user_content))
+        )
+        if skip_discussion_loop:
+            transcript.append(
+                "System: Deterministic workspace agenda pipeline completed; "
+                "skipping multi-agent discussion rounds.",
+            )
 
         if prefetched_reads:
             read_lines = [
@@ -512,7 +550,7 @@ class MultiAgentMixin:
                 })
 
         repetition_stalls = 0
-        discussion_complete = False
+        discussion_complete = skip_discussion_loop
 
         for round_num in range(max_multi_rounds):
             if discussion_complete:
@@ -586,6 +624,14 @@ class MultiAgentMixin:
                                 "routing": routing,
                             })
 
+                        if is_clarification_pending(content):
+                            return await self._build_clarification_pause_response(
+                                chat_id,
+                                effective_strategy,
+                                outputs=outputs,
+                                discussions=discussions,
+                            )
+
                         if content.startswith("[ASK_USER]"):
                             return await self._build_user_input_response(
                                 chat_id=chat_id,
@@ -594,6 +640,11 @@ class MultiAgentMixin:
                                 outputs=outputs,
                                 discussions=discussions,
                                 effective_strategy=effective_strategy,
+                                user_content=user_content,
+                                task_state=task_state,
+                                workspace_intent=workspace_intent,
+                                on_event=on_event,
+                                role_ids=role_ids,
                             )
                     if discussion_complete:
                         break
@@ -633,6 +684,14 @@ class MultiAgentMixin:
                         "routing": routing,
                     })
 
+                if is_clarification_pending(content):
+                    return await self._build_clarification_pause_response(
+                        chat_id,
+                        effective_strategy,
+                        outputs=outputs,
+                        discussions=discussions,
+                    )
+
                 if content.startswith("[ASK_USER]"):
                     if workspace_intent.wants_file_creation:
                         guarantee = await self._guarantee_workspace_deliverables(
@@ -658,6 +717,11 @@ class MultiAgentMixin:
                         outputs=outputs,
                         discussions=discussions,
                         effective_strategy=effective_strategy,
+                        user_content=user_content,
+                        task_state=task_state,
+                        workspace_intent=workspace_intent,
+                        on_event=on_event,
+                        role_ids=role_ids,
                     )
 
             if check_completion(task_state).complete:
@@ -688,7 +752,7 @@ class MultiAgentMixin:
         )
 
         if task_state and task_state.task_type == WorkspaceTaskType.WORKFLOW:
-            retry_summary, prefetched_reads = await self._execute_workspace_agenda_pipeline(
+            retry_summary, prefetched_reads, retry_paused = await self._execute_workspace_agenda_pipeline(
                 chat_id,
                 user_content,
                 workspace_intent,
@@ -696,8 +760,43 @@ class MultiAgentMixin:
                 on_event,
                 prefetched_reads,
             )
+            if retry_paused:
+                return OrchestrationResponse(
+                    chat_id=chat_id,
+                    messages=outputs,
+                    agent_discussions=discussions,
+                    pending_approvals=approval_manager.list_pending(chat_id),
+                    effective_execution_strategy=effective_strategy,
+                )
             if retry_summary:
                 transcript.append(f"System: {retry_summary}")
+            completion = check_completion(task_state)
+            if (
+                not completion.complete
+                and completion.missing
+                and not approval_manager.list_pending(chat_id)
+            ):
+                return await self._request_agent_clarification(
+                    chat_id=chat_id,
+                    kind=ClarificationKind.WORKFLOW_INCOMPLETE,
+                    question=(
+                        f"The workflow could not be completed: {completion.reason} "
+                        f"Missing: {', '.join(completion.missing)}."
+                    ),
+                    role=None,
+                    user_content=user_content,
+                    outputs=outputs,
+                    discussions=discussions,
+                    effective_strategy=effective_strategy,
+                    task_state=task_state,
+                    workspace_intent=workspace_intent,
+                    on_event=on_event,
+                    context={
+                        "reason": completion.reason,
+                        "missing": completion.missing,
+                    },
+                    role_ids=role_ids,
+                )
         else:
             prefetched_reads = await self._refresh_reads_after_writes(
                 chat_id,

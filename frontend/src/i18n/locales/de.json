@@ -245,6 +245,21 @@
     "approve": "Erlauben",
     "deny": "Ablehnen"
   },
+  "userChoice": {
+    "title": "Ihre Eingabe erforderlich",
+    "dismiss": "Schließen",
+    "customInputLabel": "Ihre Antwort",
+    "customInputPlaceholder": "Klarstellung oder Anweisung eingeben…",
+    "customSubmit": "Antwort senden",
+    "customCancel": "Zurück zu den Optionen",
+    "titles": {
+      "missingContentTag": "Fehlende Inhaltsquelle",
+      "agentBlocked": "Agent benötigt Hilfe",
+      "agentQuestion": "Agentenfrage",
+      "workflowIncomplete": "Workflow unvollständig",
+      "generic": "Klärung erforderlich"
+    }
+  },
   "agentHistory": {
     "empty": "Keine Agent-Diskussionen.",
     "title": "Agent-Verlauf",

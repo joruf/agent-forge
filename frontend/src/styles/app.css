@@ -2084,6 +2084,132 @@ body.sidebar-resizing {
   background: rgba(217, 119, 6, 0.08);
 }
 
+.user-choice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.user-choice-dialog {
+  width: min(520px, 100%);
+  max-height: min(80vh, 640px);
+  overflow: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+  padding: 20px;
+}
+
+.user-choice-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.user-choice-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.user-choice-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.user-choice-question {
+  margin: 0 0 16px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.user-choice-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.user-choice-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.user-choice-option:hover {
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.user-choice-option--danger:hover {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.user-choice-option-label {
+  font-weight: 600;
+}
+
+.user-choice-option-description {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.user-choice-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.user-choice-custom-input {
+  width: 100%;
+  min-height: 6rem;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.user-choice-custom-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+[data-theme="light"] .user-choice-overlay {
+  background: rgba(15, 23, 42, 0.55);
+}
+
+[data-theme="light"] .user-choice-dialog {
+  background: #ffffff;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+}
+
 .checkbox-label {
   display: flex !important;
   align-items: center;

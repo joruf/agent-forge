@@ -19,6 +19,7 @@ import { useI18n } from "../hooks/useI18n";
 import { AgentHistory, type ActiveAgentInfo } from "./AgentHistory";
 import { AgentRunningClock } from "./AgentRunningClock";
 import { ApprovalPanel } from "./ApprovalPanel";
+import { UserChoiceDialog } from "./UserChoiceDialog";
 import { ContextPluginLog } from "./ContextPluginLog";
 import { CommandHistoryModal } from "./CommandHistoryModal";
 import { TaskBoardPanel } from "./TaskBoardPanel";
@@ -108,6 +109,7 @@ export function ChatPanel({
   const [discussions, setDiscussions] = useState<AgentMessage[]>([]);
   const [liveDiscussions, setLiveDiscussions] = useState<AgentMessage[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const [activeUserChoice, setActiveUserChoice] = useState<ApprovalRequest | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -134,7 +136,12 @@ export function ChatPanel({
   const [taskBoard, setTaskBoard] = useState<TaskBoardSnapshot | null>(null);
   const panelMode = chat?.mode ?? draft?.mode ?? "single";
   const isQuickMode = panelMode === "quick";
-  const shellCommandEntries = collectShellCommands(messages, approvals, pendingShellCommands);
+  const shellCommandEntries = collectShellCommands(
+    messages,
+    approvals.filter((approval) => approval.action_type === "command"),
+    pendingShellCommands,
+  );
+  const commandApprovals = approvals.filter((approval) => approval.action_type === "command");
   const executedShellCommandCount = countExecutedShellCommands(shellCommandEntries);
   const chatMemorySettings = {
     enabled: true,
@@ -359,6 +366,34 @@ export function ChatPanel({
     if (!chat) return;
     await api.respondApproval(chat.id, id, approved);
     setApprovals((prev) => prev.filter((a) => a.id !== id));
+    const msgs = await api.listMessages(chat.id);
+    setMessages(msgs);
+  };
+
+  const handleUserChoice = async (approvalId: string, choiceId: string, comment = "") => {
+    if (!chat) return;
+    await api.respondApproval(chat.id, approvalId, true, comment, choiceId);
+    setApprovals((prev) => prev.filter((approval) => approval.id !== approvalId));
+    setActiveUserChoice(null);
+    setLoading(false);
+    setWorkingAgent(null);
+    setActiveAgents(new Map());
+    setStreamingContent(null);
+    onChatRunStateChange(chat.id, "idle");
+    const msgs = await api.listMessages(chat.id);
+    setMessages(msgs);
+  };
+
+  const handleUserChoiceDismiss = async (approvalId: string) => {
+    if (!chat) return;
+    await api.respondApproval(chat.id, approvalId, false);
+    setApprovals((prev) => prev.filter((approval) => approval.id !== approvalId));
+    setActiveUserChoice(null);
+    setLoading(false);
+    setWorkingAgent(null);
+    setActiveAgents(new Map());
+    setStreamingContent(null);
+    onChatRunStateChange(chat.id, "idle");
     const msgs = await api.listMessages(chat.id);
     setMessages(msgs);
   };
@@ -616,6 +651,19 @@ export function ChatPanel({
             );
           }
 
+          if (data.type === "user_choice_pending" && data.approval_id) {
+            void api.listApprovals(activeChat.id).then((pending) => {
+              setApprovals(pending);
+              const match = pending.find(
+                (approval) => approval.id === data.approval_id,
+              );
+              if (match) {
+                setActiveUserChoice(match);
+                finishLoading("idle");
+              }
+            });
+          }
+
           if (data.type === "shell_command_pending" && data.command && data.approval_id) {
             setPendingShellCommands((prev) => [
               ...prev.filter((entry) => entry.approval_id !== data.approval_id),
@@ -752,6 +800,9 @@ export function ChatPanel({
               setPendingShellCommands((prev) =>
                 prev.filter((entry) => entry.approval_id !== data.approval_id),
               );
+              setActiveUserChoice((prev) =>
+                prev?.id === data.approval_id ? null : prev,
+              );
             }
             void Promise.all([
               api.listMessages(activeChat.id).then(setMessages),
@@ -793,6 +844,12 @@ export function ChatPanel({
             setDiscussions(data.result.agent_discussions);
             setLiveDiscussions([]);
             setApprovals(data.result.pending_approvals);
+            const pendingChoice = data.result.pending_approvals.find(
+              (approval) => approval.action_type === "user_choice",
+            );
+            if (pendingChoice) {
+              setActiveUserChoice(pendingChoice);
+            }
             if (data.result.resolved_role_id) {
               applyResolvedRole(data.result.resolved_role_id);
             }
@@ -1022,7 +1079,12 @@ export function ChatPanel({
         )}
       </header>
 
-      <ApprovalPanel approvals={approvals} onRespond={handleApproval} />
+      <ApprovalPanel approvals={commandApprovals} onRespond={handleApproval} />
+      <UserChoiceDialog
+        approval={activeUserChoice}
+        onChoose={handleUserChoice}
+        onDismiss={handleUserChoiceDismiss}
+      />
 
       <div className="chat-body">
         <section className="messages" ref={messagesRef}>

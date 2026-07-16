@@ -110,6 +110,7 @@ from agentforge.services.command_audit import (
 )
 
 
+from agentforge.agents.orchestrator_mixins.clarification import ClarificationMixin
 from agentforge.agents.orchestrator_mixins.deliverables import DeliverablesMixin
 from agentforge.agents.orchestrator_mixins.multi_agent import MultiAgentMixin
 from agentforge.agents.orchestrator_mixins.parsing import ParsingMixin
@@ -133,6 +134,7 @@ def _effective_chat_memory(memory: ChatMemorySettings) -> ChatMemorySettings:
 class AgentOrchestrator(
     ParsingMixin,
     DeliverablesMixin,
+    ClarificationMixin,
     ToolLoopMixin,
     MultiAgentMixin,
     SingleAgentMixin,
@@ -598,9 +600,16 @@ class AgentOrchestrator(
         outputs: list[MessageResponse],
         discussions: list[AgentMessage],
         effective_strategy: ExecutionStrategy,
+        *,
+        user_content: str = "",
+        task_state: TaskState | None = None,
+        workspace_intent: WorkspaceIntent | None = None,
+        on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        mode: OrchestrationMode = OrchestrationMode.MULTI,
+        role_ids: list[str] | None = None,
     ) -> OrchestrationResponse:
         """
-        Persist a [ASK_USER] message and return a partial orchestration response.
+        Open a clarification dialog for [ASK_USER] agent output.
 
         :param chat_id: Chat session ID
         :param role: Requesting role
@@ -608,23 +617,31 @@ class AgentOrchestrator(
         :param outputs: Output messages collected so far
         :param discussions: Agent discussions collected so far
         :param effective_strategy: Effective execution strategy for this run
-        :return: Orchestration response waiting for user input
+        :param user_content: Original user prompt
+        :param task_state: Active task board, if any
+        :param workspace_intent: Parsed workspace intent, if any
+        :param on_event: Optional WebSocket event callback
+        :param mode: Orchestration mode for resume
+        :param role_ids: Selected role IDs for resume
+        :return: Orchestration response waiting for user choice
         """
-        ask_msg = await conversation_store.add_message(
-            chat_id,
-            MessageRole.AGENT,
-            content.replace("[ASK_USER]", "").strip(),
-            agent_id=role.id,
-            agent_name=role.name,
-            metadata={"needs_user_input": True},
-        )
-        outputs.append(ask_msg)
-        return OrchestrationResponse(
+        from agentforge.agents.user_clarification import ClarificationKind
+
+        question = content.replace("[ASK_USER]", "").strip()
+        return await self._request_agent_clarification(
             chat_id=chat_id,
-            messages=outputs,
-            agent_discussions=discussions,
-            pending_approvals=approval_manager.list_pending(chat_id),
-            effective_execution_strategy=effective_strategy,
+            kind=ClarificationKind.AGENT_QUESTION,
+            question=question,
+            role=role,
+            user_content=user_content,
+            outputs=outputs,
+            discussions=discussions,
+            effective_strategy=effective_strategy,
+            task_state=task_state,
+            workspace_intent=workspace_intent,
+            on_event=on_event,
+            mode=mode,
+            role_ids=role_ids,
         )
 
     async def run(
