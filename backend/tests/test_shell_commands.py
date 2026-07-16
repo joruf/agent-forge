@@ -41,7 +41,7 @@ async def test_execute_tool_call_routes_shell_through_audit(monkeypatch) -> None
     orchestrator = AgentOrchestrator()
     expected = ToolCallResult(tool="run_command", success=True, output="[OK]")
     monkeypatch.setattr(
-        "agentforge.agents.orchestrator.execute_shell_command",
+        "agentforge.agents.orchestrator_mixins.tool_loop.execute_shell_command",
         AsyncMock(return_value=expected),
     )
 

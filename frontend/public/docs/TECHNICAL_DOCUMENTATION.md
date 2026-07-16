@@ -17,6 +17,9 @@ Diese Dokumentation beschreibt **wie der Code intern funktioniert**: welche Modu
 5. [AgentOrchestrator — zentraler Ablauf](#5-agentorchestrator--zentraler-ablauf)
 6. [Orchestrierungsmodi](#6-orchestrierungsmodi)
 7. [Workspace Intent Detection](#7-workspace-intent-detection)
+   - [7.1 Prompt Normalizer](#71-prompt-normalizer)
+   - [7.2 Workspace Agenda](#72-workspace-agenda)
+   - [7.3 Workspace Path Resolver](#73-workspace-path-resolver)
 8. [Workspace Scanner und Executor](#8-workspace-scanner-und-executor)
 9. [Task Board (Schwarzes Brett)](#9-task-board-schwarzes-brett)
 10. [Command Audit (Pflicht-Protokollierung)](#10-command-audit-pflicht-protokollierung)
@@ -83,7 +86,10 @@ Kernprinzip: Jede Workspace-Aktion (Lesen, Schreiben, Auflisten, Shell) läuft �
 | Main App | `agentforge/main.py` | FastAPI-App, CORS, Lifespan |
 | Routes | `agentforge/api/routes.py` | REST + WebSocket |
 | Config | `agentforge/config.py` | Pydantic-Settings aus `.env` |
-| Orchestrator | `agentforge/agents/orchestrator.py` | Quick/Single/Multi-Loops, Tool-Runden |
+| Orchestrator | `agentforge/agents/orchestrator.py` | Quick/Single/Multi-Loops, Tool-Runden (Mixin-Module unter `orchestrator_mixins/`) |
+| Prompt Normalizer | `agentforge/agents/prompt_normalizer.py` | Rechtschreib-/Typo-Korrektur vor Intent-Parsing |
+| Workspace Agenda | `agentforge/agents/workspace_agenda.py` | Mehrschritt-Agenda (mkdir → write → read → edit) |
+| Path Resolver | `agentforge/agents/workspace_path_resolver.py` | Kanonische Pfade für Tool-Aufrufe |
 | Workspace Intent | `agentforge/agents/workspace_intent.py` | Intent-Erkennung aus User-Text |
 | Task Board | `agentforge/agents/task_state.py` | Schwarzes Brett, Facts, Completion |
 | Workspace Scanner | `agentforge/agents/workspace_scanner.py` | Verzeichnis-Scan mit Audit |
@@ -106,6 +112,7 @@ Kernprinzip: Jede Workspace-Aktion (Lesen, Schreiben, Auflisten, Shell) läuft �
 |---------|------|---------------|-------|
 | uvicorn (FastAPI) | 8765 | `run.py` | REST, WebSocket, Agent-Logik |
 | Vite Dev Server | 5173 | `run.py` | React-UI mit HMR |
+| Static frontend | 8765 | `run.py --prod` | Produktion: gebautes UI vom Backend |
 | Chromium / Tauri | — | `run.py` | Desktop-Fenster |
 
 **`run.py`** prüft Backend-Gesundheit, startet fehlende Prozesse, öffnet die UI (`AGENTFORGE_MODE`: auto, browser, window, tauri). **`stop.py`** beendet PIDs und gibt Ports frei.
@@ -135,14 +142,20 @@ sequenceDiagram
     participant UI as React Frontend
     participant WS as WebSocket Route
     participant OR as AgentOrchestrator
+    participant PN as PromptNormalizer
     participant WI as WorkspaceIntent
+    participant WA as WorkspaceAgenda
+    participant PR as PathResolver
     participant CA as CommandAudit
     participant LLM as LLMProvider
     participant TR as ToolRegistry
 
     UI->>WS: message {content, mode, role_ids}
     WS->>OR: run(chat_id, content, mode, ...)
-    OR->>WI: detect_workspace_intent(content)
+    OR->>PN: normalize_user_prompt(content)
+    OR->>WI: detect_workspace_intent(normalized)
+    OR->>WA: build_workspace_agenda(...)
+    OR->>PR: activate_path_resolution_context(...)
     OR->>CA: command_audit_scope (prefetch/scan)
     alt wants_file_read
         OR->>OR: prefetch_read_file_contents
@@ -163,6 +176,18 @@ sequenceDiagram
 
 Einstiegspunkt: **`AgentOrchestrator.run()`** in `orchestrator.py`.
 
+Die Klasse nutzt **Mixins** unter `agents/orchestrator_mixins/` (kein Verhaltenswechsel, nur Struktur):
+
+| Mixin | Datei | Verantwortung |
+|-------|-------|---------------|
+| `ParsingMixin` | `parsing.py` | JSON-Tool-Calls im Text, Weak-Content-Erkennung |
+| `DeliverablesMixin` | `deliverables.py` | Datei-Materialisierung, Agenda-Edits, Prefetch |
+| `ToolLoopMixin` | `tool_loop.py` | LLM-Tool-Schleife, Shell-Audit, Approval-Resume |
+| `MultiAgentMixin` | `multi_agent.py` | Multi-Runden, parallele Spezialisten |
+| `SingleAgentMixin` | `single_agent.py` | Single/Quick-Modi |
+
+Kernlogik (Tools bauen, Intent, Task Board, `run()`) bleibt in `orchestrator.py`.
+
 ### Schritt-für-Schritt
 
 | Phase | Was passiert |
@@ -170,14 +195,16 @@ Einstiegspunkt: **`AgentOrchestrator.run()`** in `orchestrator.py`.
 | 1. Chat laden | `conversation_store.get_chat(chat_id)` — Modus, Rollen, Memory, Execution Strategy |
 | 2. Tools bauen | `_build_tools()` — ToolRegistry mit Approval-Callback |
 | 3. User-Message speichern | Optional `conversation_store.add_message(USER, …)` |
-| 4. Readiness | `run_readiness_check()` — blockiert wenn kein Modell bereit |
-| 5. Intent | `detect_workspace_intent(user_content)` → `WorkspaceIntent` |
-| 6. Task Board | `load_task_board_memory()` + `build_task_state()` |
-| 7. Prefetch/Scan | Innerhalb `command_audit_scope`: Dateien vorladen oder Verzeichnis scannen |
-| 8. Context | Ambiente Plugins **oder** leerer Ambient-Context bei `requires_tools` |
-| 9. Modus | `_run_quick` / `_run_single` / `_run_multi` |
-| 10. Persist | `persist_task_board(chat_id, task_state)` |
-| 11. Return | `OrchestrationResponse` |
+| 4. **Prompt Normalizer** | `normalize_user_prompt(user_content)` → korrigierte Interpretation, Metadaten fürs UI |
+| 5. Readiness | `run_readiness_check()` — blockiert wenn kein Modell bereit |
+| 6. Intent | `detect_workspace_intent(interpretation_content)` → `WorkspaceIntent` |
+| 7. Task Board | `load_task_board_memory()` + `build_task_state()` (Agenda-basierte Plan-Schritte) |
+| 8. Path Resolver | `build_path_resolution_context()` + `activate_path_resolution_context()` |
+| 9. Prefetch/Scan | Innerhalb `command_audit_scope`: Dateien vorladen oder Verzeichnis scannen |
+| 10. Context | Ambiente Plugins **oder** leerer Ambient-Context bei `requires_tools` |
+| 11. Modus | `_run_quick` / `_run_single` / `_run_multi` (Mixins unter `orchestrator_mixins/`) |
+| 12. Persist | `persist_task_board(chat_id, task_state)` |
+| 13. Return | `OrchestrationResponse` |
 
 ### Execution Strategy (Multi-Agent)
 
@@ -240,6 +267,62 @@ Analysiert die User-Nachricht **vor** dem LLM-Aufruf, um Workspace-Aktionen zu e
 ### Prompt-Addon
 
 `build_prompt_addon()` hängt dem System-Prompt präzise Anweisungen an (z. B. „MUST use read_file“, „never only JSON“).
+
+---
+
+### 7.1 Prompt Normalizer
+
+**Datei:** `agents/prompt_normalizer.py`
+
+Läuft **vor** `detect_workspace_intent()`. Korrigiert Tippfehler in DE/EN Workspace-Keywords und Dateiendungen, damit schwache Ollama-Modelle Intent-Patterns zuverlässig treffen.
+
+| Ausgabe | Verwendung |
+|---------|------------|
+| `normalized` | Text für Intent, Agenda und Path Resolver |
+| `corrections` | Liste `{original, corrected, reason}` |
+| `changed` | Ob Korrekturen angewendet wurden |
+
+Bei gespeicherten User-Messages werden Metadaten (`prompt_corrections`, `interpreted_request`) persistiert; das Frontend kann ein `prompt_normalized`-WebSocket-Event anzeigen.
+
+Tests: `tests/test_prompt_normalizer.py`
+
+---
+
+### 7.2 Workspace Agenda
+
+**Datei:** `agents/workspace_agenda.py`
+
+Zerlegt mehrschrittige Anfragen in eine **nummerierte Agenda** (1..N), z. B. Ordner anlegen → Datei schreiben → lesen → Text ersetzen.
+
+| `AgendaAction` | Bedeutung |
+|----------------|-----------|
+| `CREATE_DIRECTORY` | Verzeichnis anlegen |
+| `WRITE_FILE` | Datei schreiben |
+| `READ_FILE` | Datei lesen und Inhalt zeigen |
+| `EDIT_FILE` | Textersetzung in bestehender Datei |
+
+`build_workspace_agenda()` liefert `AgendaStep`-Einträge mit `step_id`, `path`, `detail` und optional `replace_from` / `replace_to`.
+
+Die Agenda speist `build_plan_from_agenda()` in `task_state.py` (Task-Plan-Schritte) und `_apply_agenda_edits()` im Orchestrator (deterministische Edits nach Read-Back).
+
+Tests: `tests/test_workspace_agenda.py`
+
+---
+
+### 7.3 Workspace Path Resolver
+
+**Datei:** `agents/workspace_path_resolver.py`
+
+Hält während einer Orchestrierung einen **ContextVar-Kontext** mit kanonischen Pfaden (geplante Deliverables, Read-Ziele, Intent-Pfade). Wenn das LLM einen falschen relativen Pfad in `read_file` / `write_file` übergibt, mappt `resolve_workspace_path()` auf den passenden Kanon-Pfad.
+
+| Funktion | Zweck |
+|----------|--------|
+| `build_path_resolution_context()` | Sammelt kanonische Pfade aus Agenda/Intent |
+| `activate_path_resolution_context()` | Setzt ContextVar für Tool-Ausführung |
+| `resolve_workspace_path()` | Wird von `tools/registry.py` vor Datei-Operationen aufgerufen |
+| `deactivate_path_resolution_context()` | Räumt ContextVar im `finally` von `run()` auf |
+
+Tests: `tests/test_workspace_path_resolver.py`
 
 ---
 
@@ -575,6 +658,7 @@ Weitere Client-Typen: `stop`, `intervention` (Live-Eingabe während laufender Or
 | `agent_end` | Agent beendet Turn |
 | `agent_message` | Multi-Agent Diskussionsbeitrag |
 | `role_resolved` | Auto-Rollenauswahl (Single) |
+| `prompt_normalized` | Prompt-Korrekturen (Normalizer) |
 | `model_selected` | Gewähltes LLM-Modell |
 | `content_delta` | Streaming-Text |
 | `tool_call` | Tool-Aufruf gestartet |
@@ -618,12 +702,29 @@ Enthält:
 | `test_prompt_orchestration_outcomes.py` | E2E-Orchestrierung (gemocktes LLM) |
 | `test_prompt_task_board_outcomes.py` | Task Board Unit-Tests |
 | `test_prompt_path_extraction.py` | Pfad-Extraktion Regression |
+| `test_prompt_normalizer.py` | Prompt-Normalizer (Typo/Keyword-Korrektur) |
+| `test_workspace_agenda.py` | Workspace-Agenda (Mehrschritt-Workflows) |
+| `test_workspace_path_resolver.py` | Path-Resolver / Kanon-Pfade |
 
 Marker in `pytest.ini`: `audit`, `quality`
 
 ### CI
 
-`.github/workflows/quality-tests.yml` — läuft bei Backend-Änderungen.
+`.github/workflows/quality-tests.yml` — drei Jobs:
+
+| Job | Inhalt |
+|-----|--------|
+| `backend-quality` | `./scripts/run-quality-tests.sh` |
+| `backend-pytest-full` | Volle pytest-Suite (ohne Live-Ollama) |
+| `frontend-tests` | Vitest Unit + Playwright E2E-Smoke |
+
+### Frontend-Tests
+
+```bash
+cd frontend
+npm run test:unit    # Vitest
+npm run test:e2e     # Playwright (UI-Smoke, Vite dev server)
+```
 
 ### Standard-Tests
 
@@ -647,6 +748,10 @@ agent-forge/
 │   │   ├── api/routes.py
 │   │   ├── agents/
 │   │   │   ├── orchestrator.py      # Kern-Orchestrierung
+│   │   │   ├── orchestrator_mixins/ # Parsing, Tool-Loop, Single/Multi, Deliverables
+│   │   │   ├── prompt_normalizer.py
+│   │   │   ├── workspace_agenda.py
+│   │   │   ├── workspace_path_resolver.py
 │   │   │   ├── workspace_intent.py
 │   │   │   ├── task_state.py
 │   │   │   ├── workspace_scanner.py

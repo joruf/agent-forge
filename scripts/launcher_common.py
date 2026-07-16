@@ -21,6 +21,7 @@ BACKEND_PORT = 8765
 FRONTEND_PORT = 5173
 BACKEND_HEALTH = f"http://127.0.0.1:{BACKEND_PORT}/api/health"
 FRONTEND_URL = f"http://127.0.0.1:{FRONTEND_PORT}/"
+PROD_APP_URL = f"http://127.0.0.1:{BACKEND_PORT}/"
 
 
 def ensure_dirs() -> None:

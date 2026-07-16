@@ -361,7 +361,8 @@ def test_approval_response_broadcasts_websocket_event(api_client: TestClient) ->
         assert event["type"] == "approval_result"
         assert event["approval_id"] == approval_id
         assert event["approved"] is False
-        assert event["message"] is None
+        assert event["message"] is not None
+        assert event["message"]["metadata"]["status"] == "denied"
 
 
 def test_approval_response_broadcasts_resumed_message_event(

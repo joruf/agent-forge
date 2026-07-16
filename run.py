@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -20,6 +21,7 @@ from launcher_common import (  # noqa: E402
     FRONTEND,
     FRONTEND_URL,
     LOG_DIR,
+    PROD_APP_URL,
     ensure_dirs,
     find_browser_command,
     free_port,
@@ -71,7 +73,7 @@ def show_error(message: str) -> None:
         )
 
 
-def start_backend() -> None:
+def start_backend(*, production: bool = False) -> None:
     """Start FastAPI backend if not already running."""
     if http_ok(BACKEND_HEALTH):
         log_message("Backend läuft bereits.")
@@ -86,12 +88,16 @@ def start_backend() -> None:
     ensure_dirs()
     log_file = open(LOG_DIR / "backend.log", "a", encoding="utf-8")
     log_message("Starte Backend...")
+    env = os.environ.copy()
+    if production:
+        env["AGENTFORGE_PROD"] = "1"
     process = subprocess.Popen(
         [str(python_executable()), "-m", "agentforge"],
         cwd=BACKEND,
         stdout=log_file,
         stderr=log_file,
         start_new_session=True,
+        env=env,
     )
     write_pid("backend", process.pid)
     wait_for_http(BACKEND_HEALTH)
@@ -186,10 +192,75 @@ def open_browser() -> None:
     wait_for_frontend()
 
 
+def ensure_frontend_build() -> None:
+    """Build the frontend for production serving when dist is missing."""
+    dist_index = FRONTEND / "dist" / "index.html"
+    if dist_index.exists():
+        return
+
+    if not (FRONTEND / "node_modules").exists():
+        message = "Frontend nicht installiert. Bitte zuerst: python3 install.py"
+        show_error(message)
+        sys.exit(1)
+
+    log_message("Baue Frontend für Produktion (npm run build)...")
+    env = os.environ.copy()
+    env["VITE_API_BASE"] = "/api"
+    subprocess.run(["npm", "run", "build"], cwd=FRONTEND, check=True, env=env)
+
+
+def run_production() -> None:
+    """Start backend with static frontend build on a single port."""
+    log_message("=== AgentForge (Produktion) ===")
+    ensure_frontend_build()
+    try:
+        start_backend(production=True)
+    except Exception as exc:
+        show_error(f"AgentForge konnte nicht starten:\n{exc}")
+        log_message(traceback.format_exc())
+        sys.exit(1)
+
+    log_message(f"Produktion: {PROD_APP_URL}")
+    if shutil_which("xdg-open"):
+        subprocess.Popen(
+            ["xdg-open", PROD_APP_URL],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+    pid = read_pid("backend")
+    if pid is None:
+        while True:
+            time.sleep(3600)
+        return
+    try:
+        os.waitpid(pid, 0)
+    except ChildProcessError:
+        while True:
+            time.sleep(3600)
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse launcher CLI arguments."""
+    parser = argparse.ArgumentParser(description="Start AgentForge")
+    parser.add_argument(
+        "--prod",
+        action="store_true",
+        help="Production mode: serve built frontend from backend (port 8765, no Vite dev server)",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
     """Run AgentForge launcher."""
+    args = parse_args()
     os.chdir(ROOT)
     ensure_dirs()
+
+    if args.prod:
+        run_production()
+        return
 
     try:
         from desktop_setup import maybe_prompt_desktop_setup

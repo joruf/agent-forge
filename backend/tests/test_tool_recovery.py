@@ -20,11 +20,12 @@ async def test_recover_after_tool_limit_uses_tool_summaries(monkeypatch) -> None
     intent = detect_workspace_intent("Fix index.php in GitHub/Test")
 
     monkeypatch.setattr(
-        "agentforge.agents.orchestrator.missing_requested_files",
+        "agentforge.agents.orchestrator_mixins.tool_loop.missing_requested_files",
         lambda _content, _intent: [],
     )
 
     message = await orchestrator._recover_after_tool_limit(
+        "recovery-chat",
         llm=llm,
         messages=[{"role": "user", "content": "Fix index.php"}],
         routing=routing,
@@ -52,17 +53,29 @@ async def test_recover_after_tool_limit_materializes_missing_files(monkeypatch) 
     intent = detect_workspace_intent(prompt)
 
     monkeypatch.setattr(
-        "agentforge.agents.orchestrator.missing_requested_files",
+        "agentforge.agents.orchestrator_mixins.tool_loop.missing_requested_files",
         lambda _content, _intent: ["GitHub/Test/index.php"],
     )
 
-    async def fake_materialize(user_content: str, file_paths: list[str], role_id: str = "developer") -> str:
-        assert file_paths == ["GitHub/Test/index.php"]
+    async def fake_guarantee(
+        self,
+        chat_id: str,
+        user_content: str,
+        intent,
+        role_id: str = "developer",
+        on_event=None,
+    ) -> str:
+        assert chat_id == "recovery-chat"
         return "Created files on disk:\n- GitHub/Test/index.php"
 
-    monkeypatch.setattr(orchestrator, "_materialize_missing_files", fake_materialize)
+    monkeypatch.setattr(
+        AgentOrchestrator,
+        "_guarantee_workspace_deliverables",
+        fake_guarantee,
+    )
 
     message = await orchestrator._recover_after_tool_limit(
+        "recovery-chat",
         llm=llm,
         messages=[{"role": "user", "content": prompt}],
         routing=routing,

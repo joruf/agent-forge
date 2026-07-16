@@ -55,13 +55,14 @@ AgentForge is a local-first AI assistant that can read and write files in your w
 ### Key features
 
 - **Single-agent coding mode** — one developer agent with file and shell tools
-- **Multi-agent mode** — six built-in roles collaborate; live agent history panel
+- **Multi-agent mode** — nine built-in roles collaborate; live agent history panel
 - **Human-in-the-loop** — shell command whitelist + approval dialog for everything else
 - **Expandable agent history** — truncated messages expand on click
 - **Configurable memory** — per-chat token budget (100 – 128 000 tokens), configured in Properties
 - **LLM auto-routing** — task-type based model selection (coding, SQL, research, …)
 - **Multi-provider support** — Ollama (local/remote) + OpenAI, Claude, Gemini, Groq, Mistral via LiteLLM
 - **Setup wizard** — guided first-run checks for Ollama, models, workspace, API keys
+- **Pre-LLM pipeline** — prompt normalizer, workspace agenda, and path resolver improve reliability with local Ollama models
 - **Persistent chats** — SQLite storage with auto-generated titles
 - **Bilingual UI** — English and German
 - **Desktop integration** — browser or Chromium app window; optional Tauri build; automated menu shortcut on Linux
@@ -76,6 +77,9 @@ AgentForge is a local-first AI assistant that can read and write files in your w
 | Researcher | Research and technical summaries |
 | Documentation | README, API docs, user guides |
 | Project Manager | Coordinates agents, involves the user |
+| Software Tester | Test design, execution, and QA findings |
+| Security Engineer | Security review and vulnerability mitigation |
+| DevOps Engineer | CI/CD, deployment scripts, infrastructure automation |
 
 Custom roles can be added as YAML files in `assets/roles/`.
 
@@ -461,6 +465,7 @@ python3 stop.py
 | Command | Behaviour |
 |---------|-----------|
 | `python3 run.py` | Default on Linux: Chromium/Firefox app window when available |
+| `python3 run.py --prod` | Production mode: serve built frontend from backend on port 8765 (no Vite dev server) |
 | `AGENTFORGE_MODE=browser python run.py` | Open in default browser tab (simplest on Windows/macOS) |
 | `AGENTFORGE_MODE=window python run.py` | Force standalone browser window |
 | `AGENTFORGE_MODE=tauri python run.py` | Native Tauri app (requires Rust + platform-specific deps) |
@@ -480,7 +485,9 @@ python3 stop.py
 
 ### Ollama (primary)
 
-Point `AGENTFORGE_OLLAMA_BASE_URL` to any reachable Ollama instance — local PC, Docker container, or NAS.
+Point `AGENTFORGE_OLLAMA_BASE_URL` to any reachable Ollama instance — local PC, Docker container, or NAS (e.g. Synology). See [docs/REMOTE_OLLAMA.md](docs/REMOTE_OLLAMA.md) for remote setup notes.
+
+For **remote access** (IPv6-only hosts, corporate firewalls, optional HTTPS reverse proxy), see [docs/REMOTE_OLLAMA.md](docs/REMOTE_OLLAMA.md). Keep private hostnames in your local `backend/.env` only.
 
 Recommended fast models for CPU-only setups:
 
@@ -515,6 +522,26 @@ All providers are routed through [LiteLLM](https://github.com/BerriAI/litellm).
 
 ---
 
+## Pre-LLM workspace pipeline
+
+Before the orchestrator calls an LLM for workspace tasks, AgentForge runs a deterministic pre-processing chain:
+
+```
+User message → Prompt Normalizer → Workspace Intent → Workspace Agenda → Path Resolver → Task Board → Agents
+```
+
+| Stage | Module | Purpose |
+|-------|--------|---------|
+| **Prompt Normalizer** | `agents/prompt_normalizer.py` | Fixes typos and normalizes DE/EN workspace keywords so weak local models parse intent correctly |
+| **Workspace Intent** | `agents/workspace_intent.py` | Detects read/write/list/shell intents and target paths |
+| **Workspace Agenda** | `agents/workspace_agenda.py` | Orders multi-step requests (mkdir → write → read → edit) into numbered steps |
+| **Path Resolver** | `agents/workspace_path_resolver.py` | Remaps wrong tool paths to canonical workspace targets during tool execution |
+| **Task Board** | `agents/task_state.py` | Shared facts, plan steps, and completion checks for multi-agent runs |
+
+Details: [docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md) (sections 7–9).
+
+---
+
 ## Project structure
 
 ```
@@ -540,6 +567,7 @@ AgentForge/
 ├── docs/
 │   ├── USER_MANUAL.md
 │   ├── USER_MANUAL.html       # End-user guide
+│   ├── REMOTE_OLLAMA.md       # Remote Ollama connectivity (generic)
 │   ├── TECHNICAL_DOCUMENTATION.md
 │   └── TECHNICAL_DOCUMENTATION.html
 ├── install.py               # Dependency installer
@@ -586,8 +614,20 @@ All file operations are restricted to `AGENTFORGE_WORKSPACE_ROOT`.
 ## Testing
 
 ```bash
-# Unit tests (no live Ollama required)
+# Quality + audit regression suite (orchestration, intent, command audit)
+./scripts/run-quality-tests.sh
+
+# Full backend unit tests (no live Ollama)
+cd backend && pytest tests/ -q --ignore=tests/test_live_ollama.py
+
+# Legacy wrapper (same as pytest above)
 python3 run_tests.py
+
+# Frontend unit tests (Vitest)
+cd frontend && npm run test:unit
+
+# Frontend E2E smoke (Playwright; starts Vite dev server)
+cd frontend && npm run test:e2e
 
 # Include live Ollama integration tests
 python3 run_tests.py --live
@@ -600,10 +640,12 @@ python3 run_tests.py --live
 | Document | Audience | Format |
 |----------|----------|--------|
 | [README.md](README.md) | Everyone | Overview + install |
+| [docs/REMOTE_OLLAMA.md](docs/REMOTE_OLLAMA.md) | Operators | Remote Ollama connectivity (generic) |
 | [docs/USER_MANUAL.md](docs/USER_MANUAL.md) | End users | Full usage guide (Markdown) |
 | [docs/USER_MANUAL.html](docs/USER_MANUAL.html) | End users | Full usage guide (HTML) |
 | [docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md) | Developers | Architecture, internals (Markdown, DE) |
 | [docs/TECHNICAL_DOCUMENTATION.html](docs/TECHNICAL_DOCUMENTATION.html) | Developers | Architecture, API, internals (HTML) |
+| [docs/REMOTE_OLLAMA.md](docs/REMOTE_OLLAMA.md) | Operators | Remote Ollama / NAS setup |
 
 Open the HTML documentation in any browser:
 

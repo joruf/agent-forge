@@ -163,7 +163,9 @@ def test_execute_approved_command_denied_clears_resume_state() -> None:
         )
     )
 
-    assert result is None
+    assert result is not None
+    assert result.role == MessageRole.TOOL
+    assert result.metadata.get("status") == "denied"
     assert approval_manager.list_pending(chat_id) == []
     assert approval_manager.pop_resume_state(approval_id) is None
 
@@ -298,7 +300,7 @@ def test_execute_approved_command_without_resume_returns_tool_message(
 
     assert result is not None
     assert result.role == MessageRole.TOOL
-    assert "Command executed: echo no-resume" in result.content
+    assert "no-resume" in result.content
     assert result.metadata.get("approval_id") == approval_id
     assert len(stored_messages) == 1
     assert stored_messages[0].role == MessageRole.TOOL

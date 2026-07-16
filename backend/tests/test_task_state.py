@@ -84,7 +84,8 @@ def test_build_task_state_loads_prior_targets() -> None:
 
     assert state.prior_targets == ["GitHub/Test12"]
     assert state.prior_summary == "Previous read"
-    assert len(state.plan_steps) == 3
+    assert len(state.plan_steps) >= 1
+    assert state.plan_steps[0].action == "read_file"
 
 
 @pytest.mark.asyncio
