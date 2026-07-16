@@ -26,6 +26,7 @@ from agentforge.agents.task_state import (
     increment_weak_retry,
     load_task_board_memory,
     MAX_REPETITION_STALLS,
+    emit_task_board_update,
     persist_task_board,
     record_tool_result_as_fact,
     seed_read_facts,
@@ -711,6 +712,7 @@ class AgentOrchestrator(
             interpreted_request=interpretation_content,
             prompt_corrections=prompt_corrections,
         )
+        await emit_task_board_update(on_event, task_state)
         path_resolution = build_path_resolution_context(
             interpretation_content,
             workspace_intent,
@@ -742,6 +744,7 @@ class AgentOrchestrator(
                                 listing_targets[0],
                                 path_context,
                             )
+            await emit_task_board_update(on_event, task_state)
             process_context = path_context
             if workspace_intent.requires_tools:
                 process_context = "\n".join(
@@ -810,7 +813,7 @@ class AgentOrchestrator(
                         ChatUpdate(role_ids=[result.resolved_role_id]),
                     )
 
-            await persist_task_board(chat_id, task_state)
+            await persist_task_board(chat_id, task_state, on_event=on_event)
             return result
         finally:
             deactivate_path_resolution_context(path_context_token)

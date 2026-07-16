@@ -92,6 +92,37 @@
     "inputPlaceholderMultiActive": "Join the discussion… (Enter to send, Shift+Enter or Ctrl+Enter for new line)",
     "send": "Send"
   },
+  "taskBoard": {
+    "title": "Task plan",
+    "complete": "Complete",
+    "status": {
+      "pending": "Pending",
+      "active": "In progress",
+      "done": "Done"
+    },
+    "taskType": {
+      "workflow": "Workflow",
+      "read_and_display": "Read file",
+      "write_files": "Write files",
+      "write_then_read": "Write and read",
+      "list_directory": "List directory",
+      "run_command": "Run command",
+      "general": "General"
+    },
+    "action": {
+      "create_directory": "Create folder",
+      "write_file": "Write file",
+      "read_file": "Read file",
+      "edit_file": "Edit file",
+      "list_directory": "List directory",
+      "run_command": "Run command",
+      "verify_content": "Verify content",
+      "verify_on_disk": "Verify on disk",
+      "present_to_user": "Present result",
+      "analyze": "Coordinate"
+    },
+    "interpretedRequestTitle": "Interpreted as"
+  },
   "shellCommands": {
     "open": "Show console commands",
     "openWithCount": "Show console commands ({{count}} executed)",

@@ -46,6 +46,25 @@ export interface PromptCorrection {
   reason?: string;
 }
 
+export type TaskBoardStepStatus = "pending" | "active" | "done";
+
+export interface TaskBoardStep {
+  step_id: number;
+  action: string;
+  assignee: string;
+  detail: string;
+  path: string | null;
+  status: TaskBoardStepStatus;
+}
+
+export interface TaskBoardSnapshot {
+  task_type: string;
+  complete: boolean;
+  reason: string;
+  targets: string[];
+  steps: TaskBoardStep[];
+}
+
 export interface Message {
   id: string;
   chat_id: string;

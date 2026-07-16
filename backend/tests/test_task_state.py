@@ -9,6 +9,7 @@ from agentforge.agents.task_state import (
     build_escalation_message,
     build_final_response_from_task_state,
     build_pm_verification_block,
+    build_task_board_ui_payload,
     build_task_state,
     check_completion,
     discussion_entry_is_repeat,
@@ -209,3 +210,18 @@ def test_discussion_similarity_ignores_minor_changes() -> None:
     left = "VERDICT: fail REASON: Missing verified file content for the requested path"
     right = "VERDICT: fail REASON: Missing verified file content for requested path"
     assert discussion_similarity(left, right) >= 0.85
+
+
+def test_build_task_board_ui_payload_marks_completed_read_step() -> None:
+    """UI payload marks read steps done when verified file content exists."""
+    intent = detect_workspace_intent(READ_PROMPT)
+    state = build_task_state(READ_PROMPT, intent)
+    seed_read_facts(state, {"GitHub/Test12/test12345.txt": "Hello World"})
+
+    payload = build_task_board_ui_payload(state)
+
+    assert payload["type"] == "task_board_updated"
+    assert payload["task_type"] == TaskType.READ_AND_DISPLAY.value
+    assert payload["steps"]
+    assert any(step["status"] == "done" for step in payload["steps"])
+    assert payload["complete"] is True

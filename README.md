@@ -643,7 +643,7 @@ python3 run_tests.py --live
 | [docs/REMOTE_OLLAMA.md](docs/REMOTE_OLLAMA.md) | Operators | Remote Ollama connectivity (generic) |
 | [docs/USER_MANUAL.md](docs/USER_MANUAL.md) | End users | Full usage guide (Markdown) |
 | [docs/USER_MANUAL.html](docs/USER_MANUAL.html) | End users | Full usage guide (HTML) |
-| [docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md) | Developers | Architecture, internals (Markdown, DE) |
+| [docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md) | Developers | Architecture, internals (Markdown, EN) |
 | [docs/TECHNICAL_DOCUMENTATION.html](docs/TECHNICAL_DOCUMENTATION.html) | Developers | Architecture, API, internals (HTML) |
 | [docs/REMOTE_OLLAMA.md](docs/REMOTE_OLLAMA.md) | Operators | Remote Ollama / NAS setup |
 

@@ -27,6 +27,7 @@ from agentforge.agents.task_state import (
     format_task_plan_block,
     increment_weak_retry,
     MAX_REPETITION_STALLS,
+    emit_task_board_update,
     record_tool_result_as_fact,
     seed_read_facts,
     seed_write_facts,
@@ -392,6 +393,8 @@ class ToolLoopMixin:
                             "success": tool_result.success,
                             "output": tool_result.output[:500],
                         })
+
+                await emit_task_board_update(on_event, task_state)
 
                 if unknown_tool_count == len(tool_calls):
                     messages.append({

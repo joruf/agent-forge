@@ -27,6 +27,7 @@ from agentforge.agents.task_state import (
     format_task_plan_block,
     increment_weak_retry,
     MAX_REPETITION_STALLS,
+    emit_task_board_update,
     record_tool_result_as_fact,
     seed_read_facts,
     seed_write_facts,
@@ -373,6 +374,7 @@ class DeliverablesMixin:
                         replace_to=step.replace_to,
                     )
 
+        await emit_task_board_update(on_event, task_state)
         if not applied:
             return ""
         return "Applied file edits:\n- " + "\n- ".join(applied)

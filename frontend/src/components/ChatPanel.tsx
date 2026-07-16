@@ -12,6 +12,7 @@ import type {
   NewChatDraft,
   PromptCorrection,
   ShellCommandEntry,
+  TaskBoardSnapshot,
 } from "../types";
 import { api } from "../services/api";
 import { useI18n } from "../hooks/useI18n";
@@ -20,7 +21,7 @@ import { AgentRunningClock } from "./AgentRunningClock";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { ContextPluginLog } from "./ContextPluginLog";
 import { CommandHistoryModal } from "./CommandHistoryModal";
-import { ExpandableText } from "./ExpandableText";
+import { TaskBoardPanel } from "./TaskBoardPanel";
 import { DEFAULT_MULTI_ROLES, normalizeSingleRoleIds, SINGLE_AUTO_ROLE, sortSdlcRoles } from "../constants/roles";
 import { normalizeMemoryTokens } from "../constants/memory";
 import { formatMessageTimestamp } from "../utils/formatMessageTimestamp";
@@ -33,6 +34,7 @@ import {
   playNotificationPing,
   unlockNotificationAudio,
 } from "../utils/notificationSound";
+import { parseTaskBoardEvent, shouldShowTaskBoard } from "../utils/taskBoard";
 
 interface WorkingAgentInfo {
   roleName: string;
@@ -65,6 +67,18 @@ function readPromptCorrections(message: Message): PromptCorrection[] {
         : undefined,
     }];
   });
+}
+
+function readInterpretedRequest(message: Message): string | null {
+  const raw = message.metadata?.interpreted_request;
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const interpreted = raw.trim();
+  if (!interpreted || interpreted === message.content.trim()) {
+    return null;
+  }
+  return interpreted;
 }
 
 interface ChatPanelProps {
@@ -116,6 +130,7 @@ export function ChatPanel({
   const [workingAgent, setWorkingAgent] = useState<WorkingAgentInfo | null>(null);
   const [activeAgents, setActiveAgents] = useState<Map<string, ActiveAgentInfo>>(new Map());
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
+  const [taskBoard, setTaskBoard] = useState<TaskBoardSnapshot | null>(null);
   const panelMode = chat?.mode ?? draft?.mode ?? "single";
   const isQuickMode = panelMode === "quick";
   const shellCommandEntries = collectShellCommands(messages, approvals, pendingShellCommands);
@@ -165,6 +180,7 @@ export function ChatPanel({
   useEffect(() => {
     stickToBottomRef.current = true;
     setPendingShellCommands([]);
+    setTaskBoard(null);
     if (!chat && !draft) {
       setMessages([]);
       setDiscussions([]);
@@ -431,6 +447,7 @@ export function ChatPanel({
     onChatRunStateChange(activeChat.id, "running");
     setLiveDiscussions([]);
     setStreamingContent(null);
+    setTaskBoard(null);
     setActiveAgents(new Map());
     if (activeChat.mode === "quick") {
       setWorkingAgent({
@@ -708,6 +725,13 @@ export function ChatPanel({
                   : message
               ));
             });
+          }
+
+          if (data.type === "task_board_updated") {
+            const snapshot = parseTaskBoardEvent(data);
+            if (snapshot) {
+              setTaskBoard(snapshot);
+            }
           }
 
           if (data.type === "user_message") {
@@ -1000,6 +1024,7 @@ export function ChatPanel({
               : null;
             const errorText = messageErrors[msg.id];
             const promptCorrections = msg.role === "user" ? readPromptCorrections(msg) : [];
+            const interpretedRequest = msg.role === "user" ? readInterpretedRequest(msg) : null;
             const isLastUserMessage = msg.role === "user" && msg.id === lastUserMessageId;
 
             return (
@@ -1074,6 +1099,14 @@ export function ChatPanel({
                   </div>
                 </div>
               )}
+              {interpretedRequest && (
+                <div className="message-interpreted-request" role="note">
+                  <div className="message-interpreted-request-title">
+                    {t("taskBoard.interpretedRequestTitle")}
+                  </div>
+                  <p className="message-interpreted-request-text">{interpretedRequest}</p>
+                </div>
+              )}
               {msg.role === "user" && errorText && (
                 <div className="message-user-error">
                   <div className="message-user-error-text">{errorText}</div>
@@ -1092,6 +1125,9 @@ export function ChatPanel({
             </div>
             );
           })}
+          {shouldShowTaskBoard(taskBoard) && taskBoard && (
+            <TaskBoardPanel snapshot={taskBoard} />
+          )}
           <ContextPluginLog runs={contextPluginRuns} />
           {loading && streamingContent !== null && (
             <div className="message message-assistant message-streaming">

@@ -7,7 +7,7 @@ import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from agentforge.agents.workspace_agenda import (
     AgendaAction,
@@ -1147,12 +1147,194 @@ async def load_task_board_memory(chat_id: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-async def persist_task_board(chat_id: str, task_state: TaskState) -> None:
+def _normalize_relative_path(path: str | None) -> str:
+    """
+    Normalize a workspace-relative path for comparisons.
+
+    :param path: Raw path string
+    :return: Normalized relative path without leading slashes
+    """
+    return (path or "").strip().lstrip("/")
+
+
+def _path_matches_fact(step_path: str | None, fact_path: str | None) -> bool:
+    """
+    Return True when a verified fact path belongs to an agenda step path.
+
+    :param step_path: Target path for the plan step
+    :param fact_path: Verified fact path
+    :return: Whether the paths match exactly or nest under the step path
+    """
+    normalized_step = _normalize_relative_path(step_path)
+    normalized_fact = _normalize_relative_path(fact_path)
+    if not normalized_step or not normalized_fact:
+        return False
+    return (
+        normalized_fact == normalized_step
+        or normalized_fact.startswith(f"{normalized_step}/")
+    )
+
+
+def _path_from_plan_detail(detail: str) -> str | None:
+    """
+    Extract the first workspace-relative path embedded in a plan detail string.
+
+    :param detail: Human-readable plan step detail
+    :return: Workspace-relative path or None
+    """
+    match = re.search(
+        r"(GitHub/[^\s,]+|[A-Za-z0-9_.-]+/[^\s,]+)",
+        detail or "",
+    )
+    if not match:
+        return None
+    return match.group(1).strip().rstrip(").")
+
+
+def _agenda_path_for_plan_step(
+    task_state: TaskState,
+    plan_step: TaskPlanStep,
+) -> str | None:
+    """
+    Resolve the canonical path for one plan step.
+
+    :param task_state: Active task board
+    :param plan_step: Plan step entry
+    :return: Workspace-relative path when known
+    """
+    processing_content = task_state.interpreted_request or task_state.user_request
+    intent = detect_workspace_intent(processing_content)
+    agenda = build_workspace_agenda(processing_content, intent)
+    for agenda_step in agenda:
+        if agenda_step.step_id == plan_step.step_id:
+            return agenda_step.path
+    return _path_from_plan_detail(plan_step.detail)
+
+
+def _step_is_complete(
+    action: str,
+    path: str | None,
+    task_state: TaskState,
+) -> bool:
+    """
+    Determine whether one plan step has verified completion facts.
+
+    :param action: Plan step action name
+    :param path: Workspace-relative target path
+    :param task_state: Active task board
+    :return: True when the step is complete
+    """
+    if action == "create_directory":
+        if not path:
+            return False
+        for kind in ("file_written", "file_content", "file_edited"):
+            for fact in task_state.verified_facts(kind):
+                if _path_matches_fact(path, fact.path):
+                    return True
+        return False
+    if action == "write_file":
+        if not path:
+            return bool(task_state.verified_facts("file_written"))
+        return any(
+            _normalize_relative_path(fact.path) == _normalize_relative_path(path)
+            for fact in task_state.verified_facts("file_written")
+            if fact.path
+        )
+    if action == "read_file":
+        if path:
+            return task_state.fact_content_for_path(path) is not None
+        return bool(task_state.verified_facts("file_content"))
+    if action == "edit_file":
+        if not path:
+            return bool(task_state.verified_facts("file_edited"))
+        return any(
+            _normalize_relative_path(fact.path) == _normalize_relative_path(path)
+            for fact in task_state.verified_facts("file_edited")
+            if fact.path
+        )
+    if action == "list_directory":
+        return bool(task_state.verified_facts("directory_listing"))
+    if action in {"run_command", "execute_command"}:
+        return bool(task_state.verified_facts("command_output"))
+    if action in {
+        "verify_content",
+        "verify_on_disk",
+        "present_to_user",
+        "analyze",
+    }:
+        return check_completion(task_state).complete
+    return False
+
+
+def build_task_board_ui_payload(task_state: TaskState) -> dict[str, Any]:
+    """
+    Build a frontend-friendly task-board snapshot for WebSocket updates.
+
+    :param task_state: Active task board
+    :return: Serializable task-board payload
+    """
+    completion = check_completion(task_state)
+    steps_payload: list[dict[str, Any]] = []
+    active_assigned = False
+
+    for plan_step in task_state.plan_steps:
+        path = _agenda_path_for_plan_step(task_state, plan_step)
+        done = _step_is_complete(plan_step.action, path, task_state)
+        if done:
+            status = "done"
+        elif not active_assigned:
+            status = "active"
+            active_assigned = True
+        else:
+            status = "pending"
+        steps_payload.append(
+            {
+                "step_id": plan_step.step_id,
+                "action": plan_step.action,
+                "assignee": plan_step.assignee,
+                "detail": plan_step.detail,
+                "path": path,
+                "status": status,
+            }
+        )
+
+    return {
+        "type": "task_board_updated",
+        "task_type": task_state.task_type.value,
+        "complete": completion.complete,
+        "reason": completion.reason,
+        "targets": list(task_state.targets),
+        "steps": steps_payload,
+    }
+
+
+async def emit_task_board_update(
+    on_event: Callable[[dict[str, Any]], Awaitable[None]] | None,
+    task_state: TaskState | None,
+) -> None:
+    """
+    Push the current task-board snapshot to the UI when a callback is available.
+
+    :param on_event: Optional WebSocket event callback
+    :param task_state: Active task board or None
+    """
+    if on_event is None or task_state is None or not task_state.plan_steps:
+        return
+    await on_event(build_task_board_ui_payload(task_state))
+
+
+async def persist_task_board(
+    chat_id: str,
+    task_state: TaskState,
+    on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+) -> None:
     """
     Persist the current task-board snapshot for follow-up turns.
 
     :param chat_id: Chat session ID
     :param task_state: Active task board
+    :param on_event: Optional WebSocket callback for UI updates
     """
     payload = json.dumps(task_state.to_persisted_payload(), ensure_ascii=False)
     await memory_store.set_entry(chat_id, "chat", TASK_BOARD_MEMORY_KEY, payload)
+    await emit_task_board_update(on_event, task_state)

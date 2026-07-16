@@ -92,6 +92,37 @@
     "inputPlaceholderMultiActive": "In die Diskussion einsteigen… (Enter senden, Shift+Enter oder Strg+Enter neue Zeile)",
     "send": "Senden"
   },
+  "taskBoard": {
+    "title": "Aufgabenplan",
+    "complete": "Abgeschlossen",
+    "status": {
+      "pending": "Offen",
+      "active": "Läuft",
+      "done": "Erledigt"
+    },
+    "taskType": {
+      "workflow": "Workflow",
+      "read_and_display": "Datei lesen",
+      "write_files": "Dateien schreiben",
+      "write_then_read": "Schreiben und lesen",
+      "list_directory": "Verzeichnis auflisten",
+      "run_command": "Befehl ausführen",
+      "general": "Allgemein"
+    },
+    "action": {
+      "create_directory": "Ordner anlegen",
+      "write_file": "Datei schreiben",
+      "read_file": "Datei lesen",
+      "edit_file": "Datei bearbeiten",
+      "list_directory": "Verzeichnis auflisten",
+      "run_command": "Befehl ausführen",
+      "verify_content": "Inhalt prüfen",
+      "verify_on_disk": "Auf Platte prüfen",
+      "present_to_user": "Ergebnis liefern",
+      "analyze": "Koordinieren"
+    },
+    "interpretedRequestTitle": "Interpretiert als"
+  },
   "shellCommands": {
     "open": "Konsolenbefehle anzeigen",
     "openWithCount": "Konsolenbefehle anzeigen ({{count}} ausgeführt)",

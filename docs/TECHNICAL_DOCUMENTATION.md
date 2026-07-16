@@ -1,60 +1,60 @@
-# AgentForge — Technische Dokumentation
+# AgentForge — Technical Documentation
 
-> **Zielgruppe:** Entwickler und Maintainer  
-> **Stand:** Juli 2026  
+> **Audience:** Developers and maintainers  
+> **Last updated:** July 2026  
 > **Stack:** Python 3.12 · FastAPI · React 18 · TypeScript · LiteLLM · SQLite
 
-Diese Dokumentation beschreibt **wie der Code intern funktioniert**: welche Module zusammenarbeiten, in welcher Reihenfolge Aktionen ablaufen, und welche Datenstrukturen dabei entstehen. Sie ergänzt das [Benutzerhandbuch](USER_MANUAL.md) und die [README](../README.md).
+This document explains **how the code works internally**: which modules cooperate, in what order actions run, and which data structures are produced. It complements the [User Manual](USER_MANUAL.md) and the [README](../README.md).
 
 ---
 
-## Inhaltsverzeichnis
+## Table of Contents
 
-1. [Überblick](#1-überblick)
-2. [Systemarchitektur](#2-systemarchitektur)
-3. [Startup und Laufzeitprozesse](#3-startup-und-laufzeitprozesse)
-4. [Anfragefluss (End-to-End)](#4-anfragefluss-end-to-end)
-5. [AgentOrchestrator — zentraler Ablauf](#5-agentorchestrator--zentraler-ablauf)
-6. [Orchestrierungsmodi](#6-orchestrierungsmodi)
+1. [Overview](#1-overview)
+2. [System Architecture](#2-system-architecture)
+3. [Startup and Runtime Processes](#3-startup-and-runtime-processes)
+4. [Request Flow (End-to-End)](#4-request-flow-end-to-end)
+5. [AgentOrchestrator — Core Flow](#5-agentorchestrator--core-flow)
+6. [Orchestration Modes](#6-orchestration-modes)
 7. [Workspace Intent Detection](#7-workspace-intent-detection)
    - [7.1 Prompt Normalizer](#71-prompt-normalizer)
    - [7.2 Workspace Agenda](#72-workspace-agenda)
    - [7.3 Workspace Path Resolver](#73-workspace-path-resolver)
-8. [Workspace Scanner und Executor](#8-workspace-scanner-und-executor)
-9. [Task Board (Schwarzes Brett)](#9-task-board-schwarzes-brett)
-10. [Command Audit (Pflicht-Protokollierung)](#10-command-audit-pflicht-protokollierung)
+8. [Workspace Scanner and Executor](#8-workspace-scanner-and-executor)
+9. [Task Board](#9-task-board)
+10. [Command Audit (Mandatory Logging)](#10-command-audit-mandatory-logging)
 11. [Tool Registry](#11-tool-registry)
-12. [Multi-Agent-Orchestrierung im Detail](#12-multi-agent-orchestrierung-im-detail)
-13. [LLM-Schicht und Modell-Routing](#13-llm-schicht-und-modell-routing)
+12. [Multi-Agent Orchestration in Detail](#12-multi-agent-orchestration-in-detail)
+13. [LLM Layer and Model Routing](#13-llm-layer-and-model-routing)
 14. [Context Plugins](#14-context-plugins)
-15. [Agent-Rollen](#15-agent-rollen)
-16. [Approval Manager (Shell-Freigaben)](#16-approval-manager-shell-freigaben)
-17. [Memory-System](#17-memory-system)
-18. [Storage und Persistenz](#18-storage-und-persistenz)
-19. [Frontend-Architektur](#19-frontend-architektur)
+15. [Agent Roles](#15-agent-roles)
+16. [Approval Manager (Shell Approvals)](#16-approval-manager-shell-approvals)
+17. [Memory System](#17-memory-system)
+18. [Storage and Persistence](#18-storage-and-persistence)
+19. [Frontend Architecture](#19-frontend-architecture)
 20. [REST API](#20-rest-api)
-21. [WebSocket-Protokoll](#21-websocket-protokoll)
-22. [Sicherheitsmodell](#22-sicherheitsmodell)
-23. [Tests und Qualitätssicherung](#23-tests-und-qualitätssicherung)
-24. [Dateistruktur](#24-dateistruktur)
+21. [WebSocket Protocol](#21-websocket-protocol)
+22. [Security Model](#22-security-model)
+23. [Tests and Quality Assurance](#23-tests-and-quality-assurance)
+24. [File Structure](#24-file-structure)
 
 ---
 
-## 1. Überblick
+## 1. Overview
 
-AgentForge ist eine Desktop-KI-Plattform für Linux (optional Tauri/Browser), die:
+AgentForge is a desktop AI platform for Linux (optional Tauri/browser) that:
 
-- **Dateien** im konfigurierten Workspace liest, schreibt und Verzeichnisse auflistet
-- **Shell-Befehle** mit Whitelist/Blacklist und Benutzerfreigabe ausführt
-- **Einzel- oder Multi-Agent-Orchestrierung** mit spezialisierten Rollen durchführt
-- **LLM-Anfragen** über LiteLLM an Ollama oder Cloud-Provider (OpenAI, Anthropic, Gemini, Groq, Mistral) routet
-- **Echtzeit-Events** über WebSocket an die React-UI streamt
+- **Reads, writes, and lists files** in the configured workspace
+- **Runs shell commands** with whitelist/blacklist policies and user approval
+- **Orchestrates single- or multi-agent workflows** with specialized roles
+- **Routes LLM requests** through LiteLLM to Ollama or cloud providers (OpenAI, Anthropic, Gemini, Groq, Mistral)
+- **Streams real-time events** to the React UI over WebSocket
 
-Kernprinzip: Jede Workspace-Aktion (Lesen, Schreiben, Auflisten, Shell) läuft über kontrollierte Pfade und wird im **Command Audit** protokolliert, damit die UI „Console Commands“ vollständig und nachvollziehbar ist.
+Core principle: every workspace action (read, write, list, shell) goes through controlled paths and is logged in **Command Audit**, so the UI “Console Commands” view is complete and auditable.
 
 ---
 
-## 2. Systemarchitektur
+## 2. System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -79,63 +79,63 @@ Kernprinzip: Jede Workspace-Aktion (Lesen, Schreiben, Auflisten, Shell) läuft �
               └───────────────┴───────────────────┴─────────────────┘
 ```
 
-### Backend-Komponenten (Kurzreferenz)
+### Backend Components (Quick Reference)
 
-| Modul | Pfad | Verantwortung |
-|-------|------|---------------|
-| Main App | `agentforge/main.py` | FastAPI-App, CORS, Lifespan |
+| Module | Path | Responsibility |
+|--------|------|----------------|
+| Main App | `agentforge/main.py` | FastAPI app, CORS, lifespan, static frontend in prod |
 | Routes | `agentforge/api/routes.py` | REST + WebSocket |
-| Config | `agentforge/config.py` | Pydantic-Settings aus `.env` |
-| Orchestrator | `agentforge/agents/orchestrator.py` | Quick/Single/Multi-Loops, Tool-Runden (Mixin-Module unter `orchestrator_mixins/`) |
-| Prompt Normalizer | `agentforge/agents/prompt_normalizer.py` | Rechtschreib-/Typo-Korrektur vor Intent-Parsing |
-| Workspace Agenda | `agentforge/agents/workspace_agenda.py` | Mehrschritt-Agenda (mkdir → write → read → edit) |
-| Path Resolver | `agentforge/agents/workspace_path_resolver.py` | Kanonische Pfade für Tool-Aufrufe |
-| Workspace Intent | `agentforge/agents/workspace_intent.py` | Intent-Erkennung aus User-Text |
-| Task Board | `agentforge/agents/task_state.py` | Schwarzes Brett, Facts, Completion |
-| Workspace Scanner | `agentforge/agents/workspace_scanner.py` | Verzeichnis-Scan mit Audit |
-| Workspace Executor | `agentforge/agents/workspace_executor.py` | Prefetch von Dateiinhalten |
-| Command Audit | `agentforge/services/command_audit.py` | Pflicht-Logging aller Befehle |
-| Role Registry | `agentforge/agents/role_registry.py` | 9 Built-in + YAML-Rollen |
-| Approval Manager | `agentforge/agents/approval_manager.py` | Pending Shell-Freigaben |
-| Tool Registry | `agentforge/tools/registry.py` | LLM-Tools (read/write/list/shell/…) |
-| LLM Provider | `agentforge/llm/provider.py` | LiteLLM `acompletion` + Tools |
-| Model Router | `agentforge/llm/model_router.py` | Task-Typ → Modell |
-| Context Registry | `agentforge/context/registry.py` | Ambiente Plugins (Wetter, Datum, …) |
-| Conversation Store | `agentforge/storage/conversation_store.py` | Chats, Messages (SQLite) |
-| Memory Store | `agentforge/memory/store.py` | Chat-Memory |
+| Config | `agentforge/config.py` | Pydantic settings from `.env` |
+| Orchestrator | `agentforge/agents/orchestrator.py` | Quick/Single/Multi loops, tool rounds (mixins under `orchestrator_mixins/`) |
+| Prompt Normalizer | `agentforge/agents/prompt_normalizer.py` | Typo/keyword correction before intent parsing |
+| Workspace Agenda | `agentforge/agents/workspace_agenda.py` | Multi-step agenda (mkdir → write → read → edit) |
+| Path Resolver | `agentforge/agents/workspace_path_resolver.py` | Canonical paths for tool calls |
+| Workspace Intent | `agentforge/agents/workspace_intent.py` | Intent detection from user text |
+| Task Board | `agentforge/agents/task_state.py` | Shared facts, plan steps, completion, UI payload |
+| Workspace Scanner | `agentforge/agents/workspace_scanner.py` | Directory scan with audit |
+| Workspace Executor | `agentforge/agents/workspace_executor.py` | File prefetch and deliverables |
+| Command Audit | `agentforge/services/command_audit.py` | Mandatory logging of all commands |
+| Role Registry | `agentforge/agents/role_registry.py` | 9 built-in + YAML roles |
+| Approval Manager | `agentforge/agents/approval_manager.py` | Pending shell approvals |
+| Tool Registry | `agentforge/tools/registry.py` | LLM tools (read/write/list/shell/…) |
+| LLM Provider | `agentforge/llm/provider.py` | LiteLLM `acompletion` + tools |
+| Model Router | `agentforge/llm/model_router.py` | Task type → model |
+| Context Registry | `agentforge/context/registry.py` | Ambient plugins (weather, datetime, …) |
+| Conversation Store | `agentforge/storage/conversation_store.py` | Chats, messages (SQLite) |
+| Memory Store | `agentforge/memory/store.py` | Chat memory |
 
 ---
 
-## 3. Startup und Laufzeitprozesse
+## 3. Startup and Runtime Processes
 
-| Prozess | Port | Gestartet von | Zweck |
-|---------|------|---------------|-------|
-| uvicorn (FastAPI) | 8765 | `run.py` | REST, WebSocket, Agent-Logik |
-| Vite Dev Server | 5173 | `run.py` | React-UI mit HMR |
-| Static frontend | 8765 | `run.py --prod` | Produktion: gebautes UI vom Backend |
-| Chromium / Tauri | — | `run.py` | Desktop-Fenster |
+| Process | Port | Started by | Purpose |
+|---------|------|------------|---------|
+| uvicorn (FastAPI) | 8765 | `run.py` | REST, WebSocket, agent logic |
+| Vite dev server | 5173 | `run.py` | React UI with HMR |
+| Static frontend | 8765 | `run.py --prod` | Production: built UI served by backend |
+| Chromium / Tauri | — | `run.py` | Desktop window |
 
-**`run.py`** prüft Backend-Gesundheit, startet fehlende Prozesse, öffnet die UI (`AGENTFORGE_MODE`: auto, browser, window, tauri). **`stop.py`** beendet PIDs und gibt Ports frei.
+**`run.py`** checks backend health, starts missing processes, opens the UI (`AGENTFORGE_MODE`: auto, browser, window, tauri). **`stop.py`** terminates PIDs and frees ports.
 
-Backend-Einstieg: `python -m agentforge` → lädt Rollen, Context-Plugins, DB-Migrationen, mountet `/api`-Routes.
+Backend entry: `python -m agentforge` → loads roles, context plugins, DB migrations, mounts `/api` routes.
 
 ---
 
-## 4. Anfragefluss (End-to-End)
+## 4. Request Flow (End-to-End)
 
-### 4.1 WebSocket (primär für Chat)
+### 4.1 WebSocket (primary for chat)
 
-1. Frontend verbindet sich mit `WS /api/ws/chats/{chat_id}`.
-2. User sendet JSON mit `content`, optional `mode`, `role_ids`, `llm`.
-3. `routes.py` → `AgentOrchestrator.run(...)` mit `on_event`-Callback.
-4. Während der Ausführung: Events (`agent_start`, `tool_call`, `shell_command_recorded`, …) an den Client.
-5. Abschluss: Event `type: "complete"` mit serialisiertem `OrchestrationResponse`.
+1. Frontend connects to `WS /api/ws/chats/{chat_id}`.
+2. User sends JSON with `content`, optional `mode`, `role_ids`, `llm`.
+3. `routes.py` → `AgentOrchestrator.run(...)` with `on_event` callback.
+4. During execution: events (`agent_start`, `tool_call`, `task_board_updated`, `shell_command_recorded`, …) to the client.
+5. Completion: event `type: "complete"` with serialized `OrchestrationResponse`.
 
-### 4.2 REST (synchron)
+### 4.2 REST (synchronous)
 
-`POST /api/chats/{id}/messages` — gleiche Orchestrator-Logik, aber ohne Streaming-Events (Antwort im HTTP-Body).
+`POST /api/chats/{id}/messages` — same orchestrator logic without streaming events (response in HTTP body).
 
-### 4.3 Sequenzdiagramm (vereinfacht)
+### 4.3 Sequence Diagram (simplified)
 
 ```mermaid
 sequenceDiagram
@@ -172,117 +172,117 @@ sequenceDiagram
 
 ---
 
-## 5. AgentOrchestrator — zentraler Ablauf
+## 5. AgentOrchestrator — Core Flow
 
-Einstiegspunkt: **`AgentOrchestrator.run()`** in `orchestrator.py`.
+Entry point: **`AgentOrchestrator.run()`** in `orchestrator.py`.
 
-Die Klasse nutzt **Mixins** unter `agents/orchestrator_mixins/` (kein Verhaltenswechsel, nur Struktur):
+The class uses **mixins** under `agents/orchestrator_mixins/` (structure only, no behavior change):
 
-| Mixin | Datei | Verantwortung |
-|-------|-------|---------------|
-| `ParsingMixin` | `parsing.py` | JSON-Tool-Calls im Text, Weak-Content-Erkennung |
-| `DeliverablesMixin` | `deliverables.py` | Datei-Materialisierung, Agenda-Edits, Prefetch |
-| `ToolLoopMixin` | `tool_loop.py` | LLM-Tool-Schleife, Shell-Audit, Approval-Resume |
-| `MultiAgentMixin` | `multi_agent.py` | Multi-Runden, parallele Spezialisten |
-| `SingleAgentMixin` | `single_agent.py` | Single/Quick-Modi |
+| Mixin | File | Responsibility |
+|-------|------|----------------|
+| `ParsingMixin` | `parsing.py` | JSON tool calls in text, weak-content detection |
+| `DeliverablesMixin` | `deliverables.py` | File materialization, agenda edits, prefetch |
+| `ToolLoopMixin` | `tool_loop.py` | LLM tool loop, shell audit, approval resume |
+| `MultiAgentMixin` | `multi_agent.py` | Multi rounds, parallel specialists |
+| `SingleAgentMixin` | `single_agent.py` | Single/Quick modes |
 
-Kernlogik (Tools bauen, Intent, Task Board, `run()`) bleibt in `orchestrator.py`.
+Core logic (tool building, intent, task board, `run()`) remains in `orchestrator.py`.
 
-### Schritt-für-Schritt
+### Step-by-Step
 
-| Phase | Was passiert |
+| Phase | What happens |
 |-------|--------------|
-| 1. Chat laden | `conversation_store.get_chat(chat_id)` — Modus, Rollen, Memory, Execution Strategy |
-| 2. Tools bauen | `_build_tools()` — ToolRegistry mit Approval-Callback |
-| 3. User-Message speichern | Optional `conversation_store.add_message(USER, …)` |
-| 4. **Prompt Normalizer** | `normalize_user_prompt(user_content)` → korrigierte Interpretation, Metadaten fürs UI |
-| 5. Readiness | `run_readiness_check()` — blockiert wenn kein Modell bereit |
+| 1. Load chat | `conversation_store.get_chat(chat_id)` — mode, roles, memory, execution strategy |
+| 2. Build tools | `_build_tools()` — ToolRegistry with approval callback |
+| 3. Store user message | Optional `conversation_store.add_message(USER, …)` |
+| 4. **Prompt Normalizer** | `normalize_user_prompt(user_content)` → corrected interpretation, UI metadata |
+| 5. Readiness | `run_readiness_check()` — blocks if no model is ready |
 | 6. Intent | `detect_workspace_intent(interpretation_content)` → `WorkspaceIntent` |
-| 7. Task Board | `load_task_board_memory()` + `build_task_state()` (Agenda-basierte Plan-Schritte) |
-| 8. Path Resolver | `build_path_resolution_context()` + `activate_path_resolution_context()` |
-| 9. Prefetch/Scan | Innerhalb `command_audit_scope`: Dateien vorladen oder Verzeichnis scannen |
-| 10. Context | Ambiente Plugins **oder** leerer Ambient-Context bei `requires_tools` |
-| 11. Modus | `_run_quick` / `_run_single` / `_run_multi` (Mixins unter `orchestrator_mixins/`) |
-| 12. Persist | `persist_task_board(chat_id, task_state)` |
+| 7. Task board | `load_task_board_memory()` + `build_task_state()` (agenda-based plan steps) |
+| 8. Path resolver | `build_path_resolution_context()` + `activate_path_resolution_context()` |
+| 9. Prefetch/scan | Inside `command_audit_scope`: prefetch files or scan directories |
+| 10. Context | Ambient plugins **or** empty ambient context when `requires_tools` |
+| 11. Mode | `_run_quick` / `_run_single` / `_run_multi` (mixins under `orchestrator_mixins/`) |
+| 12. Persist | `persist_task_board(chat_id, task_state, on_event=…)` |
 | 13. Return | `OrchestrationResponse` |
 
 ### Execution Strategy (Multi-Agent)
 
-| Enum | Verhalten |
-|------|-----------|
-| `auto` | Wird zu `hybrid` aufgelöst |
-| `serial` | Rollen nacheinander |
-| `parallel` | Wird intern zu `hybrid` gemappt |
-| `hybrid` | Bestimmte Rollen (Reviewer, Security, …) parallel in einer Runde |
+| Enum | Behavior |
+|------|----------|
+| `auto` | Resolved to `hybrid` |
+| `serial` | Roles one after another |
+| `parallel` | Mapped internally to `hybrid` |
+| `hybrid` | Certain roles (Reviewer, Security, …) run in parallel within a round |
 
-Single/Quick erzwingen immer **`serial`**.
+Single/Quick always force **`serial`**.
 
 ---
 
-## 6. Orchestrierungsmodi
+## 6. Orchestration Modes
 
-Definiert in `models/schemas.py` als `OrchestrationMode`:
+Defined in `models/schemas.py` as `OrchestrationMode`:
 
-| Modus | Enum-Wert | Beschreibung |
-|-------|-----------|--------------|
-| **Quick** | `quick` | Schnelle Antwort ohne Rollen-Tools; minimaler Kontext |
-| **Single** | `single` | Eine Rolle (auto-resolve oder gewählt), volle Tool-Schleife |
-| **Multi** | `multi` | Mehrere Rollen, PM-Synthese, Implementierungs-Phase, Task Board |
+| Mode | Enum value | Description |
+|------|------------|-------------|
+| **Quick** | `quick` | Fast reply without role tools; minimal context |
+| **Single** | `single` | One role (auto-resolve or selected), full tool loop |
+| **Multi** | `multi` | Multiple roles, PM synthesis, implementation phase, task board |
 
-### Single-Agent Tool-Schleife
+### Single-Agent Tool Loop
 
-- Max. **8 Tool-Runden** (`MAX_TOOL_ROUNDS`)
-- Pro Runde: LLM → optional Tool-Calls → Ergebnisse zurück an LLM
-- Unbekannte Tools → Bailout mit Fehlermeldung
-- JSON-Tool-Calls im Text werden als Fallback geparst
+- Max. **8 tool rounds** (`MAX_TOOL_ROUNDS`)
+- Per round: LLM → optional tool calls → results back to LLM
+- Unknown tools → bailout with error message
+- JSON tool calls in text are parsed as fallback
 
-### Quick-Modus
+### Quick Mode
 
-Kein vollständiger Developer-Loop; geeignet für kurze Fragen ohne Workspace-Mutation.
+No full developer loop; suitable for short questions without workspace mutation.
 
 ---
 
 ## 7. Workspace Intent Detection
 
-**Datei:** `agents/workspace_intent.py`
+**File:** `agents/workspace_intent.py`
 
-Analysiert die User-Nachricht **vor** dem LLM-Aufruf, um Workspace-Aktionen zu erkennen.
+Analyzes the user message **before** the LLM call to detect workspace actions.
 
-### WorkspaceIntent-Felder
+### WorkspaceIntent Fields
 
-| Feld | Bedeutung |
-|------|-----------|
-| `wants_file_creation` | Datei anlegen/ändern |
-| `wants_file_read` | Dateiinhalt anzeigen (nicht schreiben) |
-| `wants_list_directory` | Verzeichnis auflisten |
-| `wants_directory_creation` | Ordner anlegen |
-| `wants_command_execution` | Shell-Befehl |
-| `target_paths` / `target_dirs` | Aufgelöste relative Pfade |
-| `requires_tools` | True wenn irgendeine Workspace-Aktion aktiv |
+| Field | Meaning |
+|-------|---------|
+| `wants_file_creation` | Create or modify files |
+| `wants_file_read` | Show file content (not write) |
+| `wants_list_directory` | List directory |
+| `wants_directory_creation` | Create folder |
+| `wants_command_execution` | Shell command |
+| `target_paths` / `target_dirs` | Resolved relative paths |
+| `requires_tools` | True when any workspace action is active |
 
-### Priorität bei Konflikten
+### Conflict Priority
 
-**Listen-Intent hat Vorrang** vor Lese-/Schreib-Keywords (z. B. „list files in src“ wird nicht als `read_file` missinterpretiert).
+**List intent takes precedence** over read/write keywords (e.g. “list files in src” is not misread as `read_file`).
 
-### Prompt-Addon
+### Prompt Addon
 
-`build_prompt_addon()` hängt dem System-Prompt präzise Anweisungen an (z. B. „MUST use read_file“, „never only JSON“).
+`build_prompt_addon()` appends precise instructions to the system prompt (e.g. “MUST use read_file”, “never only JSON”).
 
 ---
 
 ### 7.1 Prompt Normalizer
 
-**Datei:** `agents/prompt_normalizer.py`
+**File:** `agents/prompt_normalizer.py`
 
-Läuft **vor** `detect_workspace_intent()`. Korrigiert Tippfehler in DE/EN Workspace-Keywords und Dateiendungen, damit schwache Ollama-Modelle Intent-Patterns zuverlässig treffen.
+Runs **before** `detect_workspace_intent()`. Corrects typos in DE/EN workspace keywords and file extensions so weak Ollama models hit intent patterns reliably.
 
-| Ausgabe | Verwendung |
-|---------|------------|
-| `normalized` | Text für Intent, Agenda und Path Resolver |
-| `corrections` | Liste `{original, corrected, reason}` |
-| `changed` | Ob Korrekturen angewendet wurden |
+| Output | Usage |
+|--------|-------|
+| `normalized` | Text for intent, agenda, and path resolver |
+| `corrections` | List of `{original, corrected, reason}` |
+| `changed` | Whether corrections were applied |
 
-Bei gespeicherten User-Messages werden Metadaten (`prompt_corrections`, `interpreted_request`) persistiert; das Frontend kann ein `prompt_normalized`-WebSocket-Event anzeigen.
+Stored user messages include metadata (`prompt_corrections`, `interpreted_request`); the frontend shows a `prompt_normalized` WebSocket event and an “Interpreted as” block when the normalized text differs.
 
 Tests: `tests/test_prompt_normalizer.py`
 
@@ -290,20 +290,20 @@ Tests: `tests/test_prompt_normalizer.py`
 
 ### 7.2 Workspace Agenda
 
-**Datei:** `agents/workspace_agenda.py`
+**File:** `agents/workspace_agenda.py`
 
-Zerlegt mehrschrittige Anfragen in eine **nummerierte Agenda** (1..N), z. B. Ordner anlegen → Datei schreiben → lesen → Text ersetzen.
+Breaks multi-step requests into a **numbered agenda** (1..N), e.g. create folder → write file → read → replace text.
 
-| `AgendaAction` | Bedeutung |
-|----------------|-----------|
-| `CREATE_DIRECTORY` | Verzeichnis anlegen |
-| `WRITE_FILE` | Datei schreiben |
-| `READ_FILE` | Datei lesen und Inhalt zeigen |
-| `EDIT_FILE` | Textersetzung in bestehender Datei |
+| `AgendaAction` | Meaning |
+|----------------|---------|
+| `CREATE_DIRECTORY` | Create directory |
+| `WRITE_FILE` | Write file |
+| `READ_FILE` | Read file and show content |
+| `EDIT_FILE` | Text replacement in existing file |
 
-`build_workspace_agenda()` liefert `AgendaStep`-Einträge mit `step_id`, `path`, `detail` und optional `replace_from` / `replace_to`.
+`build_workspace_agenda()` returns `AgendaStep` entries with `step_id`, `path`, `detail`, and optional `replace_from` / `replace_to`.
 
-Die Agenda speist `build_plan_from_agenda()` in `task_state.py` (Task-Plan-Schritte) und `_apply_agenda_edits()` im Orchestrator (deterministische Edits nach Read-Back).
+The agenda feeds `build_plan_from_agenda()` in `task_state.py` (task plan steps) and `_apply_agenda_edits()` in the orchestrator (deterministic edits after read-back).
 
 Tests: `tests/test_workspace_agenda.py`
 
@@ -311,202 +311,211 @@ Tests: `tests/test_workspace_agenda.py`
 
 ### 7.3 Workspace Path Resolver
 
-**Datei:** `agents/workspace_path_resolver.py`
+**File:** `agents/workspace_path_resolver.py`
 
-Hält während einer Orchestrierung einen **ContextVar-Kontext** mit kanonischen Pfaden (geplante Deliverables, Read-Ziele, Intent-Pfade). Wenn das LLM einen falschen relativen Pfad in `read_file` / `write_file` übergibt, mappt `resolve_workspace_path()` auf den passenden Kanon-Pfad.
+Maintains a **ContextVar context** during orchestration with canonical paths (planned deliverables, read targets, intent paths). When the LLM passes a wrong relative path to `read_file` / `write_file`, `resolve_workspace_path()` maps it to the correct canonical path.
 
-| Funktion | Zweck |
-|----------|--------|
-| `build_path_resolution_context()` | Sammelt kanonische Pfade aus Agenda/Intent |
-| `activate_path_resolution_context()` | Setzt ContextVar für Tool-Ausführung |
-| `resolve_workspace_path()` | Wird von `tools/registry.py` vor Datei-Operationen aufgerufen |
-| `deactivate_path_resolution_context()` | Räumt ContextVar im `finally` von `run()` auf |
+| Function | Purpose |
+|----------|---------|
+| `build_path_resolution_context()` | Collects canonical paths from agenda/intent |
+| `activate_path_resolution_context()` | Sets ContextVar for tool execution |
+| `resolve_workspace_path()` | Called by `tools/registry.py` before file operations |
+| `deactivate_path_resolution_context()` | Clears ContextVar in the `finally` block of `run()` |
 
 Tests: `tests/test_workspace_path_resolver.py`
 
 ---
 
-## 8. Workspace Scanner und Executor
+## 8. Workspace Scanner and Executor
 
 ### Workspace Scanner (`workspace_scanner.py`)
 
-- Asynchrones Auflisten von Verzeichnissen
-- Jeder Scan → **`record_list_directory()`** im Command Audit
-- Liefert formatierten Kontext für Prompt und Task Board
+- Asynchronous directory listing
+- Each scan → **`record_list_directory()`** in Command Audit
+- Provides formatted context for prompts and task board
 
 ### Workspace Executor (`workspace_executor.py`)
 
-- **`prefetch_read_file_contents()`** — lädt Dateien vor dem Agent-Loop
-- Jeder Read → **`record_read_file()`** im Command Audit
-- Fehler werden als `[ERROR] …` in Facts übernommen
+- **`prefetch_read_file_contents()`** — loads files before the agent loop
+- Each read → **`record_read_file()`** in Command Audit
+- Errors are stored as `[ERROR] …` in facts
+- HTML fallbacks embed quoted literal text from the user request (e.g. `"Hello World"`)
 
-### Prefetch im Orchestrator
+### Prefetch in Orchestrator
 
-Bei `wants_file_read`:
+When `wants_file_read`:
 
-1. Prefetch aller Zielpfade
+1. Prefetch all target paths
 2. `seed_read_facts(task_state, prefetched_reads)`
-3. `build_read_context_block()` → `path_context` im Prompt
+3. `build_read_context_block()` → `path_context` in prompt
 
-Bei `wants_list_directory`:
+When `wants_list_directory`:
 
 1. `build_workspace_path_context()`
 2. `seed_list_directory_facts(task_state, dir, listing)`
 
 ---
 
-## 9. Task Board (Schwarzes Brett)
+## 9. Task Board
 
-**Datei:** `agents/task_state.py`
+**File:** `agents/task_state.py`
 
-Shared State für Multi-Agent und Completion-Checks.
+Shared state for multi-agent runs and completion checks.
 
 ### TaskType
 
-| Typ | Auslöser |
-|-----|----------|
-| `read_and_display` | Lese-Intent |
-| `write_files` | Schreib-Intent |
-| `list_directory` | Listen-Intent |
-| `run_command` | Shell-Intent |
-| `general` | Sonstiges |
+| Type | Trigger |
+|------|---------|
+| `read_and_display` | Read intent |
+| `write_files` | Write intent |
+| `write_then_read` | Write then read |
+| `workflow` | Create + read + edit compound requests |
+| `list_directory` | List intent |
+| `run_command` | Shell intent |
+| `general` | Other |
 
 ### TaskFact
 
-Verifizierte Information während der Orchestrierung:
+Verified information during orchestration:
 
 - `source`, `kind`, `path`, `content`, `verified`, `agent_id`, `round_num`
-- Duplikate gleicher `(source, path, kind)` werden ersetzt
+- Duplicates with same `(source, path, kind)` are replaced
 
-### Persistenz
+### Persistence
 
-- Key: `_agentforge_task_board` im Chat-Memory
-- `load_task_board_memory()` / `persist_task_board()` über `memory_store`
-- Limits: max. 40 Facts persistiert, max. 12 im Prompt
+- Key: `_agentforge_task_board` in chat memory
+- `load_task_board_memory()` / `persist_task_board()` via `memory_store`
+- Also stores `interpreted_request` for follow-up turns
+- Limits: max. 40 facts persisted, max. 12 in prompt
 
-### Completion-Check
+### Completion Check
 
-Vor finaler Synthese prüft der Orchestrator, ob alle Ziele erfüllt sind (z. B. fehlende Dateien → Weak-Retry, max. 2×).
+Before final synthesis the orchestrator verifies all goals are met (e.g. missing files → weak retry, max. 2×).
 
-Bei `TaskType.WORKFLOW` nutzt der Completion-Check die **`interpreted_request`**-Variante (nach Prompt-Normalizer) für Agenda und Edit-Schritte — nicht den rohen User-Text mit Tippfehlern.
+For `TaskType.WORKFLOW`, the completion check uses the **`interpreted_request`** variant (after prompt normalizer) for agenda and edit steps — not the raw user text with typos.
 
-### Seed-Funktionen
+### UI Snapshot
 
-| Funktion | Wann |
+`build_task_board_ui_payload()` and `emit_task_board_update()` produce WebSocket event `task_board_updated` with numbered plan steps and status (`pending`, `active`, `done`). The React **`TaskBoardPanel`** renders this live in the chat.
+
+### Seed Functions
+
+| Function | When |
 |----------|------|
-| `seed_read_facts` | Nach Prefetch |
-| `seed_list_directory_facts` | Nach Directory-Scan |
-| `seed_write_facts` | Nach garantierter Datei-Erstellung |
+| `seed_read_facts` | After prefetch |
+| `seed_list_directory_facts` | After directory scan |
+| `seed_write_facts` | After guaranteed file creation |
+| `seed_edit_facts` | After agenda edit step |
 
 ---
 
-## 10. Command Audit (Pflicht-Protokollierung)
+## 10. Command Audit (Mandatory Logging)
 
-**Datei:** `services/command_audit.py`
+**File:** `services/command_audit.py`
 
-**Regel:** Jede Workspace- und Shell-Aktion muss protokolliert werden. Direkte Aufrufe von `run_shell_command()` sind nur in `command_audit.py` und `shell_security.py` erlaubt (wird durch Tests erzwungen).
+**Rule:** Every workspace and shell action must be logged. Direct calls to `run_shell_command()` are only allowed in `command_audit.py` and `shell_security.py` (enforced by tests).
 
-### ContextVar-Scope
+### ContextVar Scope
 
 ```python
 async with command_audit_scope(chat_id, agent_id, agent_name, on_event):
-    # Alle record_* Aufrufe in diesem Block nutzen den Kontext
+    # All record_* calls in this block use the context
 ```
 
-### Protokoll-Funktionen
+### Logging Functions
 
-| Funktion | Quelle | Anzeige in UI |
-|----------|--------|---------------|
-| `record_command` | Shell (allgemein) | Console Commands |
-| `record_read_file` | read_file Tool / Prefetch | Console Commands |
-| `record_list_directory` | list_directory / Scanner | Console Commands |
-| `execute_approved_shell_command` | Genehmigter Shell-Befehl | Console Commands |
+| Function | Source | UI display |
+|----------|--------|------------|
+| `record_command` | Shell (general) | Console Commands |
+| `record_read_file` | read_file tool / prefetch | Console Commands |
+| `record_list_directory` | list_directory / scanner | Console Commands |
+| `execute_approved_shell_command` | Approved shell command | Console Commands |
 
-### WebSocket-Events
+### WebSocket Events
 
-| type | Bedeutung |
-|------|-----------|
-| `shell_command_recorded` | Eintrag persistiert (`entry`-Objekt) |
-| `shell_command_pending` | Wartet auf User-Freigabe |
+| type | Meaning |
+|------|---------|
+| `shell_command_recorded` | Entry persisted (`entry` object) |
+| `shell_command_pending` | Waiting for user approval |
 
-Messages werden als `MessageRole.TOOL` mit `metadata.kind = "shell_command"` in SQLite gespeichert.
+Messages are stored as `MessageRole.TOOL` with `metadata.kind = "shell_command"` in SQLite.
 
 ---
 
 ## 11. Tool Registry
 
-**Datei:** `tools/registry.py`
+**File:** `tools/registry.py`
 
-| Tool-Name | Klasse | Beschreibung |
-|-----------|--------|--------------|
-| `read_file` | ReadFileTool | Textdatei lesen (Truncation via `max_output_chars`) |
-| `write_file` | WriteFileTool | Datei schreiben, Parent-Dirs anlegen |
-| `list_directory` | ListDirectoryTool | Verzeichnisinhalt |
-| `run_command` | ShellTool | Shell — **nur** über Command Audit |
-| `remember` | RememberTool | Fact in Chat-Memory |
-| `search_files` | FileSearchTool | Dateisuche im Workspace |
-| `web_search` | WebSearchTool | Websuche (wenn konfiguriert) |
+| Tool name | Class | Description |
+|-----------|-------|-------------|
+| `read_file` | ReadFileTool | Read text file (truncation via `max_output_chars`) |
+| `write_file` | WriteFileTool | Write file, create parent dirs |
+| `list_directory` | ListDirectoryTool | Directory listing |
+| `run_command` | ShellTool | Shell — **only** via Command Audit |
+| `remember` | RememberTool | Fact in chat memory |
+| `search_files` | SearchFilesTool | File search in workspace |
+| `web_search` | WebSearchTool | Web search (when enabled) |
 
-Alle Pfade relativ zu **`AGENTFORGE_WORKSPACE_ROOT`**; Path-Traversal wird abgewiesen.
+All paths are relative to **`AGENTFORGE_WORKSPACE_ROOT`**; path traversal is rejected.
 
-### Tool-Ausführung im Orchestrator
+### Tool Execution in Orchestrator
 
-1. LLM liefert `tool_calls`
-2. Event `tool_call` an Frontend
-3. Registry führt aus → Audit-Logging
+1. LLM returns `tool_calls`
+2. Event `tool_call` to frontend
+3. Registry executes → audit logging
 4. Event `tool_result`
-5. Ergebnis zurück an LLM für nächste Runde
+5. Result back to LLM for next round
 
 ---
 
-## 12. Multi-Agent-Orchestrierung im Detail
+## 12. Multi-Agent Orchestration in Detail
 
-**Methode:** `_run_multi()`
+**Method:** `_run_multi()`
 
-### Ablauf
+### Flow
 
-1. Rollen laden (Default: PM + Developer + Reviewer wenn leer)
-2. PM wird immer eingefügt falls fehlend
-3. `_order_roles_for_intent()` — Intent-basierte Reihenfolge
-4. Task-Plan in Transcript
-5. **`_ensure_requested_files()`** — Implementierungs-Phase für Schreib-Intents
-6. Prefetch-Reads ins Transcript
-7. **Runden-Loop** (`max_multi_rounds`, konfigurierbar für Ollama)
-   - Pro Rolle: `_run_multi_role_turn()`
-   - Parallel-Batches für Reviewer/Security/Tester bei `hybrid`
-   - `[ASK_USER]` → Pause oder Deliverable-Guarantee
-8. PM-Synthese / Final Response
-9. Weak-Content-Retries bei unvollständigen Antworten
+1. Load roles (default: PM + Developer + Reviewer if empty)
+2. PM is always inserted if missing
+3. `_order_roles_for_intent()` — intent-based order
+4. Task plan in transcript
+5. **`_ensure_requested_files()`** — implementation phase for write intents
+6. Prefetch reads into transcript
+7. **Round loop** (`max_multi_rounds`, configurable for Ollama)
+   - Per role: `_run_multi_role_turn()`
+   - Parallel batches for Reviewer/Security/Tester with `hybrid`
+   - `[ASK_USER]` → pause or deliverable guarantee
+8. PM synthesis / final response
+9. Weak-content retries on incomplete answers
 
-### Spezialfälle
+### Special Cases
 
-- Developer nach Implementierungs-Phase in Runde 0 überspringen
-- Bei Schreib-Intent + `[ASK_USER]`: `_guarantee_workspace_deliverables()` versucht Dateien trotzdem zu schreiben
-- User-Interventionen über `intervention_queue` während laufender Orchestrierung
+- Skip Developer in round 0 after implementation phase
+- Write intent + `[ASK_USER]`: `_guarantee_workspace_deliverables()` still tries to write files
+- User interventions via `intervention_queue` during active orchestration
 
 ---
 
-## 13. LLM-Schicht und Modell-Routing
+## 13. LLM Layer and Model Routing
 
 ### LLMProvider (`llm/provider.py`)
 
-- Wrapper um LiteLLM `acompletion()`
-- Unterstützt Streaming (`content_delta`-Events)
-- Tool-Schemas im OpenAI-Format
+- Wrapper around LiteLLM `acompletion()`
+- Supports streaming (`content_delta` events)
+- Tool schemas in OpenAI format
 
 ### Model Router (`llm/model_router.py`)
 
-1. Auto-Routing aus? → `default_model`
-2. Task-Typ aus User-Content + Rolle erkennen
-3. User-Registry-Zuweisung
+1. Auto-routing off? → `default_model`
+2. Detect task type from user content + role
+3. User registry assignment
 4. Fallback: `assets/models.yaml`
-5. Ollama-Tag-Verifikation
+5. Ollama tag verification
 
-### Cloud Provider (`llm/cloud_providers.py`)
+### Cloud Providers (`llm/cloud_providers.py`)
 
-API-Keys aus Settings; Prefixe: `openai/`, `anthropic/`, `gemini/`, `groq/`, `mistral/`.
+API keys from settings; prefixes: `openai/`, `anthropic/`, `gemini/`, `groq/`, `mistral/`.
 
-Event `model_selected` informiert Frontend über gewähltes Modell.
+Event `model_selected` informs the frontend about the chosen model.
 
 ---
 
@@ -514,109 +523,111 @@ Event `model_selected` informiert Frontend über gewähltes Modell.
 
 **Registry:** `context/registry.py`
 
-Ambiente Kontext-Plugins (nur wenn **kein** aktiver Workspace-Tool-Intent):
+Ambient context plugins (only when **no** active workspace tool intent):
 
-| Plugin | Inhalt |
-|--------|--------|
-| datetime | Aktuelle Zeit |
-| weather | Wetter (Standort/IP) |
-| sun_times | Sonnenauf-/untergang |
-| holidays | Feiertage |
-| exchange_rates | Wechselkurse |
-| country_facts / random_fact | Statische Fakten |
+| Plugin | Content |
+|--------|---------|
+| datetime | Current time |
+| weather | Weather (location/IP) |
+| sun_times | Sunrise/sunset |
+| holidays | Public holidays |
+| exchange_rates | Exchange rates |
+| country_facts / random_fact | Static facts |
 
 Events: `context_plugin_start`, `context_plugin_complete`.
 
-Bei `workspace_intent.requires_tools == True` wird **`_ambient_context` leer gesetzt** — Workspace-Kontext hat Priorität.
+When `workspace_intent.requires_tools == True`, **`_ambient_context` is cleared** — workspace context takes priority.
 
 ---
 
-## 15. Agent-Rollen
+## 15. Agent Roles
 
-**9 Built-in-Rollen** in `role_registry.py`:
+**9 built-in roles** in `role_registry.py`:
 
-| ID | Name | Fokus |
+| ID | Name | Focus |
 |----|------|-------|
-| `developer` | Developer | Code schreiben, Tools nutzen |
-| `reviewer` | Reviewer | Code-Review |
-| `architect` | Architect | Systemdesign |
-| `researcher` | Researcher | Recherche |
+| `developer` | Developer | Write code, use tools |
+| `reviewer` | Reviewer | Code review |
+| `architect` | Architect | System design |
+| `researcher` | Researcher | Research |
 | `documentation` | Documentation | Docs/README |
-| `project_manager` | Project Manager | Koordination, Synthese |
-| `software_tester` | Software Tester | QA, Tests |
-| `security` | Security Engineer | Sicherheitsreview |
-| `devops` | DevOps Engineer | CI/CD, Deployment |
+| `project_manager` | Project Manager | Coordination, synthesis |
+| `software_tester` | Software Tester | QA, tests |
+| `security` | Security Engineer | Security review |
+| `devops` | DevOps Engineer | CI/CD, deployment |
 
-Custom-Rollen: YAML/JSON in `assets/roles/`.
+Custom roles: YAML/JSON in `assets/roles/`.
 
-Single-Modus: `resolve_single_role()` wählt Rolle aus Text oder Default `developer`.
-
----
-
-## 16. Approval Manager (Shell-Freigaben)
-
-**Datei:** `agents/approval_manager.py`
-
-Shell-Befehle durchlaufen `shell_security.classify_shell_command()`:
-
-| Policy | Beispiele | Aktion |
-|--------|-----------|--------|
-| Whitelist | `git`, `npm`, `python`, `ls`, `grep` | Auto-Ausführung |
-| Blacklist | `rm`, `sudo`, `curl`, `ssh` | Blockiert |
-| Unlisted | Sonstige | User-Freigabe nötig |
-
-Pending Approvals: `GET /api/chats/{id}/approvals`  
-Freigabe: `POST /api/chats/{id}/approvals/{aid}`
+Single mode: `resolve_single_role()` picks role from text or default `developer`.
 
 ---
 
-## 17. Memory-System
+## 16. Approval Manager (Shell Approvals)
 
-**Datei:** `memory/store.py`
+**File:** `agents/approval_manager.py`
 
-- Pro Chat konfigurierbar: Token-Budget, enabled/disabled
-- Scope ist aktuell **immer `chat`** (Validator erzwingt das)
-- `remember`-Tool speichert Facts
-- Task Board nutzt separaten Memory-Key `_agentforge_task_board`
+Shell commands go through `shell_security.classify_shell_command()`:
+
+| Policy | Examples | Action |
+|--------|----------|--------|
+| Whitelist | `git`, `npm`, `python`, `ls`, `grep` | Auto-run |
+| Blacklist | `rm`, `sudo`, `curl`, `ssh` | Blocked |
+| Unlisted | Other | User approval required |
+
+Pending approvals: `GET /api/chats/{id}/approvals`  
+Approve: `POST /api/chats/{id}/approvals/{aid}`
 
 ---
 
-## 18. Storage und Persistenz
+## 17. Memory System
 
-### Datenverzeichnis
+**File:** `memory/store.py`
+
+- Per-chat configurable: token budget, enabled/disabled
+- Scope is currently **always `chat`** (validator enforces this)
+- `remember` tool stores facts
+- Task board uses separate memory key `_agentforge_task_board`
+
+---
+
+## 18. Storage and Persistence
+
+### Data Directory
 
 Default: `~/.local/share/agentforge/`
 
-| Datei | Inhalt |
-|-------|--------|
-| `agentforge.db` | Chats, Messages, Memory |
-| `model_config.json` | Modell-Registry, Routing |
-| `setup_state.json` | Setup-Wizard-Status |
+| File | Content |
+|------|---------|
+| `agentforge.db` | Chats, messages, memory |
+| `model_config.json` | Model registry, routing |
+| `setup_state.json` | Setup wizard state |
 
-### Runtime (Projekt)
+### Runtime (Project)
 
-| Pfad | Inhalt |
-|------|--------|
-| `.run/backend.pid` | Backend-PID |
-| `.run/logs/*.log` | Launcher/Backend/Frontend-Logs |
-| `backend/.env` | Lokale Secrets (nicht committen) |
+| Path | Content |
+|------|---------|
+| `.run/backend.pid` | Backend PID |
+| `.run/logs/*.log` | Launcher/backend/frontend logs |
+| `backend/.env` | Local secrets (do not commit) |
 
 ---
 
-## 19. Frontend-Architektur
+## 19. Frontend Architecture
 
-| Bereich | Pfad | Beschreibung |
-|---------|------|--------------|
-| Entry | `src/App.tsx` | Layout, Modals, Chat-Routing |
-| Chat | `src/components/ChatPanel.tsx` | Messages, WebSocket, Approvals |
-| Sidebar | `src/components/Sidebar.tsx` | Chat-Liste, Tastatur (Del, ↑/↓) |
-| Command History | `src/components/CommandHistoryModal.tsx` | Console Commands aus Audit |
-| Context Plugins | `src/components/ContextPluginLog.tsx` | Plugin-Events |
-| API | `src/services/api.ts` | REST-Client |
-| Shell Utils | `src/utils/shellCommands.ts` | Parsing von Command-Entries |
-| i18n | `src/i18n/locales/{en,de}.json` | UI-Übersetzungen |
+| Area | Path | Description |
+|------|------|-------------|
+| Entry | `src/App.tsx` | Layout, modals, chat routing |
+| Chat | `src/components/ChatPanel.tsx` | Messages, WebSocket, approvals, task board |
+| Task Board | `src/components/TaskBoardPanel.tsx` | Live plan steps from `task_board_updated` |
+| Sidebar | `src/components/Sidebar.tsx` | Chat list, keyboard (Del, ↑/↓) |
+| Command History | `src/components/CommandHistoryModal.tsx` | Console Commands from audit |
+| Context Plugins | `src/components/ContextPluginLog.tsx` | Plugin events |
+| API | `src/services/api.ts` | REST client |
+| Shell utils | `src/utils/shellCommands.ts` | Parsing command entries |
+| Task board utils | `src/utils/taskBoard.ts` | Parse WebSocket task board payload |
+| i18n | `src/i18n/locales/{en,de}.json` | UI translations (app UI only; docs are English) |
 
-WebSocket-Handler in `ChatPanel` verarbeitet alle `type`-Events und aktualisiert lokalen State.
+The WebSocket handler in `ChatPanel` processes all `type` events and updates local state.
 
 ---
 
@@ -624,18 +635,20 @@ WebSocket-Handler in `ChatPanel` verarbeitet alle `type`-Events und aktualisiert
 
 Base URL: `http://127.0.0.1:8765/api`
 
-Wesentliche Endpunkte (vollständige Liste in HTML-Doku):
+Key endpoints (full list in HTML doc):
 
 - **Health/Settings:** `GET/POST /settings`, `GET /health`
 - **Setup:** `/setup/status`, `/setup/test`, `/setup/complete`, …
-- **Rollen:** `GET/POST /roles`
+- **Roles:** `GET/POST /roles`
 - **LLM:** `/llm/models`, `/llm/routing`, `/llm/registry`, …
-- **Chats:** CRUD `/chats`, Messages `/chats/{id}/messages`
+- **Chats:** CRUD `/chats`, messages `/chats/{id}/messages`
 - **Approvals:** `/chats/{id}/approvals`
+
+Production: `python3 run.py --prod` serves the built UI from the same host/port (`AGENTFORGE_PROD=1`).
 
 ---
 
-## 21. WebSocket-Protokoll
+## 21. WebSocket Protocol
 
 **Endpoint:** `WS /api/ws/chats/{chat_id}`
 
@@ -650,95 +663,96 @@ Wesentliche Endpunkte (vollständige Liste in HTML-Doku):
 }
 ```
 
-Weitere Client-Typen: `stop`, `intervention` (Live-Eingabe während laufender Orchestrierung).
+Other client types: `stop`, `intervention` (live input during orchestration).
 
 ### Server → Client (Events)
 
-| type | Beschreibung |
-|------|--------------|
-| `agent_start` | Agent beginnt Turn |
-| `agent_end` | Agent beendet Turn |
-| `agent_message` | Multi-Agent Diskussionsbeitrag |
-| `role_resolved` | Auto-Rollenauswahl (Single) |
-| `prompt_normalized` | Prompt-Korrekturen (Normalizer) |
-| `model_selected` | Gewähltes LLM-Modell |
-| `content_delta` | Streaming-Text |
-| `tool_call` | Tool-Aufruf gestartet |
-| `tool_result` | Tool-Ergebnis |
-| `shell_command_recorded` | Audit-Eintrag |
-| `shell_command_pending` | Freigabe erforderlich |
-| `context_plugin_start` / `context_plugin_complete` | Ambiente Plugin |
-| `user_intervention` / `user_message` | Live-User-Input |
-| **`complete`** | **Orchestrierung fertig** (mit `result`) |
-| `stopped` | Abgebrochen |
-| `error` | Fehler mit `message` |
+| type | Description |
+|------|-------------|
+| `agent_start` | Agent begins turn |
+| `agent_end` | Agent ends turn |
+| `agent_message` | Multi-agent discussion entry |
+| `role_resolved` | Auto role selection (Single) |
+| `prompt_normalized` | Prompt corrections (normalizer) |
+| `task_board_updated` | Task plan steps and status |
+| `model_selected` | Selected LLM model |
+| `content_delta` | Streaming text |
+| `tool_call` | Tool call started |
+| `tool_result` | Tool result |
+| `shell_command_recorded` | Audit entry |
+| `shell_command_pending` | Approval required |
+| `context_plugin_start` / `context_plugin_complete` | Ambient plugin |
+| `user_intervention` / `user_message` | Live user input |
+| **`complete`** | **Orchestration finished** (with `result`) |
+| `stopped` | Cancelled |
+| `error` | Error with `message` |
 
-> **Hinweis:** Das Abschluss-Event heißt `complete`, nicht `done`. Modi heißen `quick`, `single`, `multi` — nicht `coding` / `multi_agent`.
-
----
-
-## 22. Sicherheitsmodell
-
-1. **Workspace-Sandbox** — Pfade nur unter `workspace_root`
-2. **Shell-Policy** — Whitelist / Blacklist / Approval
-3. **Command Audit** — Keine stille Ausführung; alles protokolliert
-4. **API-Keys** — Maskiert in Settings-API; lokal in DB/`.env`
-5. **Netzwerk** — Backend default `127.0.0.1`
+> **Note:** The completion event is `complete`, not `done`. Modes are `quick`, `single`, `multi` — not `coding` / `multi_agent`.
 
 ---
 
-## 23. Tests und Qualitätssicherung
+## 22. Security Model
 
-### Quality-Test-Suite
+1. **Workspace sandbox** — paths only under `workspace_root`
+2. **Shell policy** — whitelist / blacklist / approval
+3. **Command audit** — no silent execution; everything logged
+4. **API keys** — masked in settings API; stored locally in DB/`.env`
+5. **Network** — backend defaults to `127.0.0.1`
+
+---
+
+## 23. Tests and Quality Assurance
+
+### Quality Test Suite
 
 ```bash
 ./scripts/run-quality-tests.sh
 ```
 
-Enthält:
+Includes:
 
-| Modul | Fokus |
-|-------|-------|
-| `test_command_audit_mandatory.py` | Pflicht-Audit für ls, read, list, Shell |
-| `test_prompt_intent_matrix.py` | Intent-Erkennung (parametrisiert) |
-| `test_prompt_orchestration_outcomes.py` | E2E-Orchestrierung (gemocktes LLM) |
-| `test_prompt_compound_outcomes.py` | Compound-Prompts: Typos, falsche Pfade, Workflow |
-| `test_prompt_task_board_outcomes.py` | Task Board Unit-Tests |
-| `test_prompt_path_extraction.py` | Pfad-Extraktion Regression |
-| `test_prompt_normalizer.py` | Prompt-Normalizer (Typo/Keyword-Korrektur) |
-| `test_workspace_agenda.py` | Workspace-Agenda (Mehrschritt-Workflows) |
-| `test_workspace_path_resolver.py` | Path-Resolver / Kanon-Pfade |
+| Module | Focus |
+|--------|-------|
+| `test_command_audit_mandatory.py` | Mandatory audit for ls, read, list, shell |
+| `test_prompt_intent_matrix.py` | Intent detection (parametrized) |
+| `test_prompt_orchestration_outcomes.py` | E2E orchestration (mocked LLM) |
+| `test_prompt_compound_outcomes.py` | Compound prompts: typos, wrong paths, workflow |
+| `test_prompt_task_board_outcomes.py` | Task board unit tests |
+| `test_prompt_path_extraction.py` | Path extraction regression |
+| `test_prompt_normalizer.py` | Prompt normalizer |
+| `test_workspace_agenda.py` | Workspace agenda (multi-step workflows) |
+| `test_workspace_path_resolver.py` | Path resolver / canonical paths |
 
-Marker in `pytest.ini`: `audit`, `quality`
+Markers in `pytest.ini`: `audit`, `quality`
 
 ### CI
 
-`.github/workflows/quality-tests.yml` — drei Jobs:
+`.github/workflows/quality-tests.yml` — three jobs:
 
-| Job | Inhalt |
-|-----|--------|
+| Job | Content |
+|-----|---------|
 | `backend-quality` | `./scripts/run-quality-tests.sh` |
-| `backend-pytest-full` | Volle pytest-Suite (ohne Live-Ollama) |
-| `frontend-tests` | Vitest Unit + Playwright E2E-Smoke |
+| `backend-pytest-full` | Full pytest suite (excluding live Ollama) |
+| `frontend-tests` | Vitest unit + Playwright E2E smoke |
 
-### Frontend-Tests
+### Frontend Tests
 
 ```bash
 cd frontend
 npm run test:unit    # Vitest
-npm run test:e2e     # Playwright (UI-Smoke, Vite dev server)
+npm run test:e2e     # Playwright (UI smoke, Vite dev server)
 ```
 
-### Standard-Tests
+### Standard Tests
 
 ```bash
 python3 run_tests.py          # Unit (mocked)
-python3 run_tests.py --live   # + Ollama Integration
+python3 run_tests.py --live   # + Ollama integration
 ```
 
 ---
 
-## 24. Dateistruktur
+## 24. File Structure
 
 ```
 agent-forge/
@@ -750,8 +764,8 @@ agent-forge/
 │   │   ├── config.py
 │   │   ├── api/routes.py
 │   │   ├── agents/
-│   │   │   ├── orchestrator.py      # Kern-Orchestrierung
-│   │   │   ├── orchestrator_mixins/ # Parsing, Tool-Loop, Single/Multi, Deliverables
+│   │   │   ├── orchestrator.py      # Core orchestration
+│   │   │   ├── orchestrator_mixins/ # Parsing, tool loop, single/multi, deliverables
 │   │   │   ├── prompt_normalizer.py
 │   │   │   ├── workspace_agenda.py
 │   │   │   ├── workspace_path_resolver.py
@@ -770,16 +784,18 @@ agent-forge/
 │   └── tests/
 ├── frontend/src/
 ├── docs/
-│   ├── TECHNICAL_DOCUMENTATION.md   # Diese Datei
+│   ├── TECHNICAL_DOCUMENTATION.md   # This file
 │   ├── TECHNICAL_DOCUMENTATION.html
+│   ├── REMOTE_OLLAMA.md
 │   └── USER_MANUAL.md
-└── assets/roles/                    # Custom YAML-Rollen
+└── assets/roles/                    # Custom YAML roles
 ```
 
 ---
 
-## Weiterführend
+## See Also
 
-- HTML-Version (Browser): [TECHNICAL_DOCUMENTATION.html](TECHNICAL_DOCUMENTATION.html)
-- Benutzerhandbuch: [USER_MANUAL.md](USER_MANUAL.md)
+- HTML version (browser): [TECHNICAL_DOCUMENTATION.html](TECHNICAL_DOCUMENTATION.html)
+- User manual: [USER_MANUAL.md](USER_MANUAL.md)
+- Remote Ollama: [REMOTE_OLLAMA.md](REMOTE_OLLAMA.md)
 - Installation: [README](../README.md)
