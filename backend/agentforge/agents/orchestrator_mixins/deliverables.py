@@ -43,6 +43,8 @@ from agentforge.agents.workspace_agenda import AgendaAction, build_workspace_age
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.agents.workspace_executor import (
     apply_file_text_replacement,
+    apply_html_heading_insertion,
+    apply_html_tag_insertion,
     build_deliverable_status_summary,
     build_implementation_prompt,
     build_materialization_prompt,
@@ -51,7 +53,9 @@ from agentforge.agents.workspace_executor import (
     file_exists_in_workspace,
     missing_requested_files,
     plan_deliverable_files,
+    plan_derived_txt_from_heading,
     plan_derived_txt_from_h1,
+    plan_write_body_from_html_source,
     prefetch_read_file_contents,
     prepare_deliverable_content,
     read_workspace_file,
@@ -424,7 +428,11 @@ class DeliverablesMixin:
                 success, html_content = read_workspace_file(source_path)
                 if not success:
                     continue
-                planned = plan_derived_txt_from_h1(source_path, html_content)
+                planned = plan_derived_txt_from_heading(
+                    source_path,
+                    html_content,
+                    naming_source=step.naming_source or "h1",
+                )
                 if not planned:
                     continue
                 derived_path, body = planned
@@ -434,14 +442,15 @@ class DeliverablesMixin:
                 write_ok, _output = await write_file_direct(derived_path, body)
                 if not write_ok:
                     continue
+                naming_label = step.naming_source or "heading"
                 applied.append(
-                    f"Created `{derived_path}` named after H1 in `{source_path}`",
+                    f"Created `{derived_path}` named after {naming_label} in `{source_path}`",
                 )
                 if task_state is not None:
                     seed_write_facts(
                         task_state,
                         [derived_path],
-                        source="derived_from_h1",
+                        source=f"derived_from_{naming_label}",
                     )
                     if derived_path not in task_state.targets:
                         task_state.targets.append(derived_path)
@@ -491,7 +500,27 @@ class DeliverablesMixin:
                     continue
 
                 if step.action == AgendaAction.WRITE_FILE and step.path:
-                    if not file_exists_in_workspace(step.path):
+                    if step.content_from_heading and step.content_source_path:
+                        success, html_content = read_workspace_file(step.content_source_path)
+                        if success:
+                            body = plan_write_body_from_html_source(
+                                html_content,
+                                step.content_from_heading,
+                            )
+                            if body:
+                                write_ok, _output = await write_file_direct(step.path, body)
+                                if write_ok and task_state is not None:
+                                    seed_write_facts(
+                                        task_state,
+                                        [step.path],
+                                        source=f"content_from_{step.content_from_heading}",
+                                    )
+                                    summaries.append(
+                                        f"Created `{step.path}` with "
+                                        f"{step.content_from_heading} text from "
+                                        f"`{step.content_source_path}`",
+                                    )
+                    elif not file_exists_in_workspace(step.path):
                         body = prepare_deliverable_content(
                             step.path,
                             fallback_file_content(step.path, user_content),
@@ -516,7 +545,30 @@ class DeliverablesMixin:
                     continue
 
                 if step.action == AgendaAction.EDIT_FILE and step.path:
-                    if step.replace_from and step.replace_to:
+                    if step.insert_heading_text:
+                        if step.insert_tag and step.insert_after_tag:
+                            success, message = await apply_html_tag_insertion(
+                                step.path,
+                                step.insert_after_tag,
+                                step.insert_tag,
+                                step.insert_heading_text,
+                            )
+                        else:
+                            success, message = await apply_html_heading_insertion(
+                                step.path,
+                                step.insert_after_heading or 1,
+                                step.insert_heading_level or 2,
+                                step.insert_heading_text,
+                            )
+                        if success and task_state is not None:
+                            seed_edit_facts(
+                                task_state,
+                                step.path,
+                                replace_from="",
+                                replace_to=step.insert_heading_text,
+                            )
+                            summaries.append(message)
+                    elif step.replace_from and step.replace_to:
                         success, message = await apply_file_text_replacement(
                             step.path,
                             step.replace_from,
@@ -536,7 +588,11 @@ class DeliverablesMixin:
                     success, html_content = read_workspace_file(step.source_path)
                     if not success:
                         continue
-                    planned = plan_derived_txt_from_h1(step.source_path, html_content)
+                    planned = plan_derived_txt_from_heading(
+                        step.source_path,
+                        html_content,
+                        naming_source=step.naming_source or "h1",
+                    )
                     if not planned:
                         continue
                     derived_path, body = planned
@@ -545,15 +601,16 @@ class DeliverablesMixin:
                         derived_path = derived_path.rsplit(".", 1)[0] + extension
                     write_ok, _output = await write_file_direct(derived_path, body)
                     if write_ok and task_state is not None:
+                        naming_label = step.naming_source or "heading"
                         seed_write_facts(
                             task_state,
                             [derived_path],
-                            source="derived_from_h1",
+                            source=f"derived_from_{naming_label}",
                         )
                         if derived_path not in task_state.targets:
                             task_state.targets.append(derived_path)
                         summaries.append(
-                            f"Created `{derived_path}` named after H1 in `{step.source_path}`",
+                            f"Created `{derived_path}` named after {naming_label} in `{step.source_path}`",
                         )
 
         await emit_task_board_update(on_event, task_state)

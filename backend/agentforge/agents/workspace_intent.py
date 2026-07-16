@@ -7,6 +7,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agentforge.config import settings
+from agentforge.utils.html_tags import (
+    DERIVED_FILE_WITH_TAG,
+    TAG_INSERT_CLAUSE,
+    clause_mentions_html_tag,
+    extract_tag_insert_from_clause,
+)
 
 
 @dataclass
@@ -62,7 +68,7 @@ class WorkspaceIntent:
             if self.wants_derived_file:
                 lines.append(
                     "5. Create any follow-up file whose name is derived from file content "
-                    "(for example a .txt file named after the H1 text in HTML)."
+                    "(for example a .txt file named after text inside an HTML element)."
                 )
             lines.append("Never skip steps. Never invent file contents.")
             if self.target_paths:
@@ -221,19 +227,7 @@ REPLACE_AGAINST = re.compile(
     re.IGNORECASE,
 )
 
-DERIVED_TXT_FROM_H1 = re.compile(
-    r"(?:"
-    r"(?:neue\s+)?datei.*?(?:namen|name).*?(?:h1|überschrift).*?(?:\.txt|dateiendung\s*\.txt)"
-    r"|"
-    r"(?:namen|name)\s+(?:des\s+)?(?:inhalts?\s+)?(?:des\s+)?(?:h1(?:-tag)?s?(?:\s+inhalts?)?|überschrift)"
-    r".*?(?:\.txt|dateiendung\s*\.txt|dateiendung)"
-    r"|"
-    r"(?:named|name(?:d)?\s+after).*?(?:h1|heading).*?(?:\.txt|txt\s+file)"
-    r"|"
-    r"file.*?named.*?h1.*?(?:\.txt|txt)"
-    r")",
-    re.IGNORECASE | re.DOTALL,
-)
+DERIVED_TXT_FROM_TAG = DERIVED_FILE_WITH_TAG
 
 NAMED_FOLDER = re.compile(
     r"(?:"
@@ -250,15 +244,30 @@ NAMED_FOLDER = re.compile(
 
 def detect_derived_filename_intent(user_content: str) -> bool:
     """
-    Return True when the user wants a file named from HTML H1 content.
+    Return True when the user wants a file named from HTML element content.
 
     :param user_content: User message text
     :return: Whether a derived filename step is required
     """
     text = user_content or ""
-    if not DERIVED_TXT_FROM_H1.search(text):
-        return False
-    return bool(re.search(r"\b(?:h1|überschrift|heading)\b", text, re.IGNORECASE))
+    try:
+        from agentforge.agents.compound_planner import split_into_clauses
+
+        clauses = split_into_clauses(text)
+    except ImportError:
+        clauses = [text]
+    if not clauses:
+        clauses = [text]
+    for clause in clauses:
+        if not DERIVED_TXT_FROM_TAG.search(clause):
+            continue
+        if clause_mentions_html_tag(clause) or re.search(
+            r"\büberschrift\b|\bheading\b",
+            clause,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
 
 
 def extract_named_folder(user_content: str) -> str | None:
@@ -288,9 +297,23 @@ def detect_file_edit_intent(user_content: str) -> bool:
     :return: Whether an edit/replace step is required
     """
     text = user_content or ""
-    if not EDIT_KEYWORDS.search(text):
-        return False
-    return bool(REPLACE_QUOTED.search(text) or REPLACE_AGAINST.search(text))
+    if EDIT_KEYWORDS.search(text) and (
+        REPLACE_QUOTED.search(text) or REPLACE_AGAINST.search(text)
+    ):
+        return True
+    try:
+        from agentforge.agents.compound_planner import split_into_clauses
+        from agentforge.utils.html_tags import extract_tag_insert_from_clause
+
+        clauses = split_into_clauses(text)
+    except ImportError:
+        clauses = [text]
+    for clause in clauses:
+        if TAG_INSERT_CLAUSE.search(clause):
+            return True
+        if extract_tag_insert_from_clause(clause):
+            return True
+    return False
 
 
 def extract_text_replacement(user_content: str) -> tuple[str, str] | None:

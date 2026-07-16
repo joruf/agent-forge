@@ -619,6 +619,26 @@ def check_completion(task_state: TaskState) -> CompletionReport:
                 reason="No verified writes recorded",
                 missing=list(task_state.targets),
             )
+        intent = detect_workspace_intent(
+            task_state.interpreted_request or task_state.user_request,
+        )
+        agenda = build_workspace_agenda(
+            task_state.interpreted_request or task_state.user_request,
+            intent,
+        )
+        write_paths = [
+            step.path
+            for step in agenda
+            if step.action == AgendaAction.WRITE_FILE and step.path
+        ]
+        if write_paths:
+            missing_writes = [path for path in write_paths if path not in written]
+            if missing_writes:
+                return CompletionReport(
+                    complete=False,
+                    reason="Missing verified write_file steps",
+                    missing=missing_writes,
+                )
         return CompletionReport(complete=True)
 
     if task_state.task_type == TaskType.WRITE_THEN_READ:
@@ -667,11 +687,25 @@ def check_completion(task_state: TaskState) -> CompletionReport:
             for fact in task_state.verified_facts("file_edited")
             if fact.path
         }
+        intent = detect_workspace_intent(
+            task_state.interpreted_request or task_state.user_request,
+        )
+        agenda = build_workspace_agenda(
+            task_state.interpreted_request or task_state.user_request,
+            intent,
+        )
         file_targets = [
             target
             for target in task_state.targets
             if target and "." in target.rsplit("/", 1)[-1]
         ]
+        write_paths = [
+            step.path
+            for step in agenda
+            if step.action == AgendaAction.WRITE_FILE and step.path
+        ]
+        if write_paths:
+            file_targets = list(dict.fromkeys(write_paths + file_targets))
         if not file_targets:
             file_targets = sorted(written | edited)
         missing_writes = [
@@ -683,9 +717,18 @@ def check_completion(task_state: TaskState) -> CompletionReport:
                 reason="Missing verified writes before read-back",
                 missing=missing_writes,
             )
+        read_paths = [
+            step.path
+            for step in agenda
+            if step.action == AgendaAction.READ_FILE and step.path
+        ]
+        if not read_paths:
+            read_paths = [
+                target for target in file_targets if target in written or target in edited
+            ]
         missing_reads = [
             target
-            for target in file_targets
+            for target in read_paths
             if task_state.fact_content_for_path(target) is None
         ]
         if missing_reads:
@@ -694,13 +737,6 @@ def check_completion(task_state: TaskState) -> CompletionReport:
                 reason="Missing verified file content after write",
                 missing=missing_reads,
             )
-        intent = detect_workspace_intent(
-            task_state.interpreted_request or task_state.user_request,
-        )
-        agenda = build_workspace_agenda(
-            task_state.interpreted_request or task_state.user_request,
-            intent,
-        )
         edit_paths = [
             step.path
             for step in agenda
@@ -734,11 +770,29 @@ def check_completion(task_state: TaskState) -> CompletionReport:
                     for path in written_all
                 )
                 if not has_derived:
+                    naming_label = step.naming_source or "heading"
                     return CompletionReport(
                         complete=False,
-                        reason="Missing derived .txt file from H1 content",
+                        reason=f"Missing derived .txt file from {naming_label} content",
                         missing=[f"{step.source_path} → *.txt"],
                     )
+        content_write_steps = [
+            step
+            for step in agenda
+            if step.action == AgendaAction.WRITE_FILE
+            and step.content_from_heading
+            and step.path
+        ]
+        for step in content_write_steps:
+            if step.path not in written:
+                return CompletionReport(
+                    complete=False,
+                    reason=(
+                        f"Missing content-source write for "
+                        f"{step.content_from_heading} in `{step.path}`"
+                    ),
+                    missing=[step.path],
+                )
         return CompletionReport(complete=True)
 
     if task_state.task_type == TaskType.LIST_DIRECTORY:
@@ -1152,6 +1206,13 @@ def build_final_response_from_task_state(task_state: TaskState) -> str:
                 if fact.path:
                     edit_lines.append(f"- {fact.path}: {fact.content}")
             blocks.append("\n".join(edit_lines))
+        written = task_state.verified_facts("file_written")
+        write_lines: list[str] = []
+        for fact in written:
+            if fact.path and fact.path not in seen_paths:
+                write_lines.append(f"- {fact.path}")
+        if write_lines:
+            blocks.append("Created or updated files:\n" + "\n".join(write_lines))
         if blocks:
             return "\n\n".join(blocks)
 

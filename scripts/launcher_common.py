@@ -162,7 +162,7 @@ def find_browser_command() -> list[str] | None:
         [
             "chromium",
             "--app={url}",
-            "--class=agentforge",
+            "--class=AgentForge",
             "--name=AgentForge",
             "--disable-dev-shm-usage",
             "--disable-translate",
@@ -171,7 +171,7 @@ def find_browser_command() -> list[str] | None:
         [
             "chromium-browser",
             "--app={url}",
-            "--class=agentforge",
+            "--class=AgentForge",
             "--name=AgentForge",
             "--disable-dev-shm-usage",
             "--disable-translate",
@@ -180,7 +180,7 @@ def find_browser_command() -> list[str] | None:
         [
             "google-chrome",
             "--app={url}",
-            "--class=agentforge",
+            "--class=AgentForge",
             "--name=AgentForge",
             "--disable-translate",
             "--lang=en-US",
@@ -188,7 +188,7 @@ def find_browser_command() -> list[str] | None:
         [
             "microsoft-edge",
             "--app={url}",
-            "--class=agentforge",
+            "--class=AgentForge",
             "--name=AgentForge",
             "--disable-translate",
             "--lang=en-US",

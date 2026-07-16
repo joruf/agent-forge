@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 from pathlib import Path
 from shutil import which
 
@@ -13,7 +14,9 @@ INIT_FILE = SCRIPT_DIR / ".initialized"
 RUN_SCRIPT = SCRIPT_DIR / "run.py"
 DESKTOP_TEMPLATE = SCRIPT_DIR / "assets" / "AgentForge.desktop"
 DESKTOP_FILENAME = "AgentForge.desktop"
-ICON_FILE = SCRIPT_DIR / "assets" / "icon.svg"
+ICON_FILE = SCRIPT_DIR / "assets" / "icons" / "agentforge.png"
+ICON_THEME_NAME = "agentforge"
+ICON_THEME_DIR = Path.home() / ".local" / "share" / "icons" / "hicolor"
 
 
 def user_desktop_dir() -> Path:
@@ -60,7 +63,11 @@ def build_desktop_entry_content() -> str:
     python_cmd = os.environ.get("AGENTFORGE_PYTHON", "python3")
     exec_line = f"Exec={python_cmd} {RUN_SCRIPT}\n"
     path_line = f"Path={SCRIPT_DIR}\n"
-    icon_line = f"Icon={ICON_FILE}\n" if ICON_FILE.is_file() else "Icon=utilities-terminal\n"
+    icon_line = (
+        f"Icon={ICON_FILE.resolve()}\n"
+        if ICON_FILE.is_file()
+        else "Icon=utilities-terminal\n"
+    )
 
     if DESKTOP_TEMPLATE.is_file():
         lines: list[str] = []
@@ -91,6 +98,7 @@ def build_desktop_entry_content() -> str:
         "Terminal=false\n"
         "Categories=Development;Utility;\n"
         "StartupNotify=true\n"
+        "StartupWMClass=AgentForge\n"
     )
 
 
@@ -100,6 +108,67 @@ def _write_shortcut(target: Path) -> None:
     target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def install_icon_theme() -> None:
+    """
+    Install PNG icons into the user icon theme for launchers and taskbars.
+
+    Many Linux desktops render SVG taskbar icons as a black square; PNG hicolor
+    entries avoid that and match StartupWMClass=agentforge.
+    """
+    source_dir = SCRIPT_DIR / "assets" / "icons"
+    if not source_dir.is_dir():
+        return
+    mappings: list[tuple[str, str]] = [
+        ("16x16.png", "16x16"),
+        ("32x32.png", "32x32"),
+        ("48x48.png", "48x48"),
+        ("64x64.png", "64x64"),
+        ("128x128.png", "128x128"),
+        ("agentforge.png", "256x256"),
+    ]
+    for filename, size in mappings:
+        source = source_dir / filename
+        if not source.is_file():
+            continue
+        target_dir = ICON_THEME_DIR / size / "apps"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_path = target_dir / f"{ICON_THEME_NAME}.png"
+        target_path.write_bytes(source.read_bytes())
+
+    index_theme = source_dir / "index.theme"
+    if index_theme.is_file():
+        ICON_THEME_DIR.mkdir(parents=True, exist_ok=True)
+        (ICON_THEME_DIR / "index.theme").write_bytes(index_theme.read_bytes())
+
+    cache_binary = which("gtk-update-icon-cache")
+    if cache_binary and ICON_THEME_DIR.is_dir():
+        subprocess.run(
+            [cache_binary, "-f", "-t", str(ICON_THEME_DIR)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    xdg_icon = which("xdg-icon-resource")
+    icon_256 = source_dir / "agentforge.png"
+    if xdg_icon and icon_256.is_file():
+        subprocess.run(
+            [
+                xdg_icon,
+                "install",
+                "--context",
+                "apps",
+                "--size",
+                "256",
+                str(icon_256),
+                ICON_THEME_NAME,
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
 def install_desktop_shortcut() -> tuple[bool, Path | None]:
     """
     Install shortcuts on the desktop and in the application menu.
@@ -107,6 +176,7 @@ def install_desktop_shortcut() -> tuple[bool, Path | None]:
     :return: Success flag and desktop shortcut path
     """
     try:
+        install_icon_theme()
         desktop_dir = user_desktop_dir()
         desktop_dir.mkdir(parents=True, exist_ok=True)
         shortcut_path = desktop_dir / DESKTOP_FILENAME

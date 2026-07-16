@@ -6,13 +6,21 @@ import pytest
 
 from agentforge.agents.workspace_executor import (
     build_implementation_prompt,
+    extract_content_source_heading,
+    extract_explicit_filename_from_clause,
     extract_h1_text,
     extract_h1_text_from_request,
+    extract_hN_text,
+    extract_html_tag_insert_from_clause,
     fallback_file_content,
     infer_requested_files,
+    insert_heading_after_heading,
     missing_requested_files,
     plan_deliverable_files,
     plan_derived_txt_from_h1,
+    plan_derived_txt_from_heading,
+    plan_write_body_from_html_source,
+    resolve_write_path,
     sanitize_filename_from_text,
     strip_code_fences,
     write_file_direct,
@@ -152,6 +160,67 @@ def test_plan_derived_txt_from_h1() -> None:
     assert planned == ("GitHub/Test12/Hello Bot.txt", "Hello Bot\n")
 
 
+def test_extract_hN_text_reads_requested_level() -> None:
+    """HN extraction returns text for the requested heading level."""
+    html = "<html><body><h1>Hello World</h1><h2>Hello Bot</h2></body></html>"
+    assert extract_hN_text(html, 1) == "Hello World"
+    assert extract_hN_text(html, 2) == "Hello Bot"
+
+
+def test_plan_derived_txt_from_heading_uses_h2() -> None:
+    """Derived txt planning can name files after H2 content."""
+    html = "<html><body><h1>Hello World</h1><h2>Hello Bot</h2></body></html>"
+    planned = plan_derived_txt_from_heading(
+        "GitHub/Test12/index.html",
+        html,
+        naming_source="h2",
+    )
+    assert planned == ("GitHub/Test12/Hello Bot.txt", "Hello Bot\n")
+
+
+def test_insert_heading_after_heading() -> None:
+    """Heading insertion adds a new HN element after an existing heading."""
+    html = "<html><body><h1>Hello World</h1></body></html>"
+    updated = insert_heading_after_heading(html, 1, 2, "Hello Bot")
+    assert "<h2>Hello Bot</h2>" in updated
+    assert updated.index("<h2>Hello Bot</h2>") > updated.index("</h1>")
+
+
+def test_extract_html_tag_insert_from_clause() -> None:
+    """German HTML insertion clauses parse after/insert levels and label."""
+    clause = (
+        "erstelle in der datei GitHub/Test12/index.html unter dem H1 Tag "
+        'einen H2 Tag mit der Beschriftung "Hello Bot".'
+    )
+    parsed = extract_html_tag_insert_from_clause(clause)
+    assert parsed == (1, 2, "Hello Bot")
+
+
 def test_sanitize_filename_from_text() -> None:
     """Filename sanitization keeps readable words and strips unsafe characters."""
     assert sanitize_filename_from_text('Hello "Bot"!') == "Hello Bot"
+
+
+def test_extract_explicit_filename_from_clause() -> None:
+    """Bare txt filenames are extracted from German write clauses."""
+    clause = "erstelle danach die txt datei 1.txt und schreibe den text vom H1 Tag"
+    assert extract_explicit_filename_from_clause(clause) == "1.txt"
+
+
+def test_extract_content_source_heading() -> None:
+    """Content-source clauses identify the heading level to copy."""
+    clause = "schreibe den text vom H1 Tag des HTML Datei rein"
+    assert extract_content_source_heading(clause) == "h1"
+
+
+def test_resolve_write_path_uses_primary_dir() -> None:
+    """Bare filenames resolve beside the primary deliverable directory."""
+    assert resolve_write_path("1.txt", "GitHub/Test12", "GitHub/Test12/index.html") == (
+        "GitHub/Test12/1.txt"
+    )
+
+
+def test_plan_write_body_from_html_source() -> None:
+    """HTML heading text becomes a plain-text file body."""
+    html = "<html><body><h1>Hello World</h1><h3>Hello Bot</h3></body></html>"
+    assert plan_write_body_from_html_source(html, "h1") == "Hello World\n"

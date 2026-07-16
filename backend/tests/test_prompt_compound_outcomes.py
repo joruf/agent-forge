@@ -79,6 +79,99 @@ def _test12_workflow_with_derived_txt_prompt(
     )
 
 
+def _test12_workflow_with_h2_insert_and_derived_txt_prompt(
+    workspace: Path,
+    *,
+    wrong_paths: bool = True,
+) -> str:
+    """
+    Build the six-step Test12 workflow with H2 insertion and H2-named .txt.
+
+    :param workspace: Temp workspace root
+    :param wrong_paths: Use GitHub/index.html instead of GitHub/Test12/index.html
+    :return: User prompt text
+    """
+    base = workspace / "GitHub"
+    read_target = f"{base}/index.html" if wrong_paths else f"{base}/Test12/index.html"
+    return (
+        f"erstelle mir einen Ordner mit dem Namen Test12\n"
+        f"im Verzeichnis\n{base}\n"
+        f"darin eine Datei mit dem Namen index.html\n"
+        f'darin fügst du in html code den text "Hello World" als H1-Tag hinzu.\n'
+        f"lese danach die Datei {read_target} aus und gebe den Inhalt hier im Prompt aus.\n"
+        f"erstelle danach in der datei {read_target} unter dem H1 Tag einen H2 Tag "
+        f'mit der Beschriftung "Hello Bot".\n'
+        "erstelle danach eine neue datei. Die Datei hat den Namen des Inhalts des "
+        "H2-Tag der erstellten HTML-Datei und hat die Dateiendung .txt"
+    )
+
+
+def _test12_workflow_with_h3_insert_derived_and_1txt_prompt(
+    workspace: Path,
+    *,
+    wrong_paths: bool = True,
+) -> str:
+    """
+    Build the seven-step Test12 workflow with H3-derived txt and explicit 1.txt.
+
+    :param workspace: Temp workspace root
+    :param wrong_paths: Use GitHub/index.html instead of GitHub/Test12/index.html
+    :return: User prompt text
+    """
+    base = workspace / "GitHub"
+    read_target = f"{base}/index.html" if wrong_paths else f"{base}/Test12/index.html"
+    return (
+        f"erstelle mir Verzeichnis mit dem Namen Test12\n"
+        f"im Ordner {base}\n"
+        f"dort eine Datei mit dem Namen index.html erstellen\n"
+        f'darin fügst du in html code den text "Hello World" als H1-Tag hinzu.\n'
+        f"lese danach die Datei {read_target} aus und geb den Inhalt hier im Prompt aus.\n"
+        f"erstelle danach in der datei {read_target} unter dem H1 Tag einen H3 Tag "
+        f'mit der Beschriftung "Hello Bot".\n'
+        "erstelle danach eine neue datei. Die Datei hat den Namen des Inhalts des "
+        "H3-Tag der erstellten HTML-Datei und hat die Dateiendung .txt\n"
+        "erstelle danach die txt datei 1.txt und schreibe den text vom H1 Tag des HTML Datei rein"
+    )
+
+
+@pytest.mark.asyncio
+async def test_seven_step_workflow_creates_h3_named_txt_and_1txt(
+    monkeypatch,
+    temp_workspace: Path,
+) -> None:
+    """Seven-step workflow creates Hello Bot.txt from H3 and 1.txt from H1 text."""
+    (temp_workspace / "GitHub").mkdir()
+    prompt = _test12_workflow_with_h3_insert_derived_and_1txt_prompt(
+        temp_workspace,
+        wrong_paths=True,
+    )
+
+    result = await run_orchestration(
+        monkeypatch,
+        temp_workspace,
+        prompt,
+        agent_loop=make_team_loop(role_responses={"developer": '{"status": "success"}'}),
+    )
+
+    html_path = temp_workspace / "GitHub" / "Test12" / "index.html"
+    derived_txt = temp_workspace / "GitHub" / "Test12" / "Hello Bot.txt"
+    explicit_txt = temp_workspace / "GitHub" / "Test12" / "1.txt"
+    html_content = html_path.read_text(encoding="utf-8")
+    assert html_path.is_file()
+    assert "Hello World" in html_content
+    assert "<h3>Hello Bot</h3>" in html_content
+    assert derived_txt.is_file()
+    assert derived_txt.read_text(encoding="utf-8").strip() == "Hello Bot"
+    assert explicit_txt.is_file()
+    assert explicit_txt.read_text(encoding="utf-8").strip() == "Hello World"
+    assert_final_message_contains(
+        result,
+        "Hello Bot.txt",
+        "1.txt",
+        "GitHub/Test12/index.html",
+    )
+
+
 @pytest.mark.asyncio
 async def test_typo_workflow_normalizes_and_applies_edit(
     monkeypatch,
@@ -157,6 +250,40 @@ async def test_six_step_workflow_creates_h1_named_txt_after_edit(
     txt_path = temp_workspace / "GitHub" / "Test12" / "Hello Bot.txt"
     assert html_path.is_file()
     assert "Hello Bot" in html_path.read_text(encoding="utf-8")
+    assert txt_path.is_file()
+    assert txt_path.read_text(encoding="utf-8").strip() == "Hello Bot"
+    assert_final_message_contains(result, "Hello Bot.txt", "GitHub/Test12/index.html")
+
+
+@pytest.mark.asyncio
+async def test_six_step_workflow_creates_h2_named_txt_after_h2_insert(
+    monkeypatch,
+    temp_workspace: Path,
+) -> None:
+    """After H2 insertion, a .txt file is created using the H2 text as its basename."""
+    (temp_workspace / "GitHub").mkdir()
+    prompt = _test12_workflow_with_h2_insert_and_derived_txt_prompt(
+        temp_workspace,
+        wrong_paths=True,
+    )
+
+    intent = detect_workspace_intent(normalize_user_prompt(prompt).normalized)
+    assert intent.wants_derived_file is True
+    assert intent.wants_file_edit is True
+
+    result = await run_orchestration(
+        monkeypatch,
+        temp_workspace,
+        prompt,
+        agent_loop=make_team_loop(role_responses={"developer": '{"status": "success"}'}),
+    )
+
+    html_path = temp_workspace / "GitHub" / "Test12" / "index.html"
+    txt_path = temp_workspace / "GitHub" / "Test12" / "Hello Bot.txt"
+    html_content = html_path.read_text(encoding="utf-8")
+    assert html_path.is_file()
+    assert "Hello World" in html_content
+    assert "<h2>Hello Bot</h2>" in html_content
     assert txt_path.is_file()
     assert txt_path.read_text(encoding="utf-8").strip() == "Hello Bot"
     assert_final_message_contains(result, "Hello Bot.txt", "GitHub/Test12/index.html")

@@ -78,6 +78,18 @@ def install_desktop_hint() -> None:
         print("  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh")
 
 
+def generate_launcher_icons() -> None:
+    """Build PNG/ICO launcher assets from assets/icon.svg."""
+    script = ROOT / "scripts" / "generate_icons.py"
+    if not script.is_file():
+        print("Icon generator missing; skipping launcher icons.")
+        return
+    try:
+        subprocess.run([sys.executable, str(script)], cwd=ROOT, check=True)
+    except subprocess.CalledProcessError:
+        print("Launcher icon generation failed (ImageMagick convert required).")
+
+
 def create_desktop_entry() -> None:
     """Create Linux desktop launcher via shared desktop setup."""
     if not sys.platform.startswith("linux"):
@@ -111,6 +123,7 @@ def main() -> None:
         install_system_deps()
     install_backend()
     install_frontend()
+    generate_launcher_icons()
     install_desktop_hint()
     create_desktop_entry()
     print("")

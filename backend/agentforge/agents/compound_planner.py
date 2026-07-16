@@ -8,9 +8,12 @@ from enum import StrEnum
 from pathlib import Path
 
 from agentforge.agents.workspace_executor import (
+    extract_content_source_heading,
+    extract_explicit_filename_from_clause,
     extract_h1_text_from_request,
     extract_literal_text_content,
     plan_deliverable_files,
+    resolve_write_path,
 )
 from agentforge.agents.workspace_intent import (
     WorkspaceIntent,
@@ -21,6 +24,12 @@ from agentforge.agents.workspace_intent import (
     detect_workspace_intent,
 )
 from agentforge.config import settings
+from agentforge.utils.html_tags import (
+    DERIVED_FILE_WITH_TAG,
+    HTML_TAG_NAME,
+    extract_tag_insert_from_clause,
+    parse_tag_reference,
+)
 
 
 class ClauseAction(StrEnum):
@@ -58,12 +67,20 @@ class CompoundClause:
     literal_text: str | None = None
     replace_from: str | None = None
     replace_to: str | None = None
+    after_heading_level: int | None = None
+    insert_heading_level: int | None = None
+    after_tag: str | None = None
+    insert_tag: str | None = None
+    insert_heading_text: str | None = None
     references_created_html: bool = False
     references_created_file: bool = False
     naming_source: str | None = None
     derived_extension: str | None = None
     resolved_path: str | None = None
     source_path: str | None = None
+    explicit_filename: str | None = None
+    content_from_heading: str | None = None
+    content_source_path: str | None = None
 
 
 @dataclass
@@ -102,6 +119,16 @@ WRITE_FILE_CLAUSE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+DARIN_FILE_CLAUSE = re.compile(
+    r"\b(?:darin|therein)\b.*?\b(?:datei|file)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+HTML_INITIAL_WRITE = re.compile(
+    rf"\b(?:füg\w+|hinzu|schreib\w+|insert|add)\b.*?\b(?:html|{HTML_TAG_NAME}(?:-tag)?|code)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
 READ_CLAUSE = re.compile(
     r"\b(lese|lies|lesen|read|show|display|ausgib\w*|zeig\w*)\b",
     re.IGNORECASE,
@@ -112,16 +139,7 @@ EDIT_CLAUSE = re.compile(
     re.IGNORECASE,
 )
 
-DERIVED_CLAUSE = re.compile(
-    r"(?:"
-    r"(?:neue\s+)?datei.*?(?:namen|name).*?(?:h1|überschrift|inhalt).*?(?:\.txt|dateiendung)"
-    r"|"
-    r"(?:namen|name)\s+(?:des\s+)?(?:inhalts?\s+)?(?:des\s+)?(?:h1|überschrift|heading)"
-    r"|"
-    r"file.*?named.*?content"
-    r")",
-    re.IGNORECASE | re.DOTALL,
-)
+DERIVED_CLAUSE = DERIVED_FILE_WITH_TAG
 
 CREATED_HTML_REF = re.compile(
     r"\b(erstellt\w*|created|geschrieben\w*|written)\b.*?\b(html|htm)\b",
@@ -204,6 +222,38 @@ def _extract_directory_from_clause(clause: str) -> str | None:
     return None
 
 
+def _is_derived_file_clause(clause: str) -> bool:
+    """
+    Return True when a clause requests a filename derived from heading content.
+
+    Explicit filenames such as ``1.txt`` without a content-naming pattern are
+    treated as regular writes, not derived-file steps.
+
+    :param clause: Prompt clause text
+    :return: Whether the clause is a derived-file request
+    """
+    if not DERIVED_CLAUSE.search(clause):
+        return False
+    explicit = extract_explicit_filename_from_clause(clause)
+    if explicit and not re.search(
+        r"namen\s+(?:des\s+)?(?:inhalts?",
+        clause,
+        re.IGNORECASE,
+    ):
+        return False
+    return True
+
+
+def _is_html_tag_insert(clause: str) -> bool:
+    """
+    Return True when a clause requests inserting an HTML element.
+
+    :param clause: Prompt clause text
+    :return: Whether the clause is an HTML element insertion edit
+    """
+    return extract_tag_insert_from_clause(clause) is not None
+
+
 def _classify_clause(clause: str) -> ClauseAction:
     """
     Infer the primary action for one clause.
@@ -211,15 +261,21 @@ def _classify_clause(clause: str) -> ClauseAction:
     :param clause: Prompt clause text
     :return: Clause action label
     """
-    if DERIVED_CLAUSE.search(clause):
+    if _is_derived_file_clause(clause):
         return ClauseAction.WRITE_DERIVED_FILE
     if CREATE_DIR_CLAUSE.search(clause) and not WRITE_FILE_CLAUSE.search(clause):
         return ClauseAction.CREATE_DIRECTORY
+    if _is_html_tag_insert(clause):
+        return ClauseAction.EDIT_FILE
     if EDIT_CLAUSE.search(clause):
         return ClauseAction.EDIT_FILE
     if READ_CLAUSE.search(clause):
         return ClauseAction.READ_FILE
-    if WRITE_FILE_CLAUSE.search(clause):
+    if (
+        WRITE_FILE_CLAUSE.search(clause)
+        or DARIN_FILE_CLAUSE.search(clause)
+        or HTML_INITIAL_WRITE.search(clause)
+    ):
         return ClauseAction.WRITE_FILE
     if CREATE_DIR_CLAUSE.search(clause):
         return ClauseAction.CREATE_DIRECTORY
@@ -276,6 +332,13 @@ def _is_context_clause(clause: str) -> bool:
     if PATH_TOKEN.fullmatch(stripped):
         return True
     if re.match(r"^(im verzeichnis|in folder|in directory|under)\b", stripped, re.IGNORECASE):
+        if (
+            DARIN_FILE_CLAUSE.search(stripped)
+            or HTML_INITIAL_WRITE.search(stripped)
+            or WRITE_FILE_CLAUSE.search(stripped)
+            or CREATE_DIR_CLAUSE.search(stripped)
+        ):
+            return False
         return True
     return False
 
@@ -387,14 +450,25 @@ def _reconcile_plan_with_intent(
         if clause.action == ClauseAction.CREATE_DIRECTORY and primary_dir:
             clause.resolved_path = primary_dir
         elif clause.action in {
-            ClauseAction.WRITE_FILE,
             ClauseAction.READ_FILE,
             ClauseAction.EDIT_FILE,
         } and primary_file:
+            if not clause.resolved_path:
+                clause.resolved_path = primary_file
+            elif Path(clause.resolved_path).name == Path(primary_file).name:
+                clause.resolved_path = primary_file
+        elif clause.action == ClauseAction.WRITE_FILE and primary_file and not clause.resolved_path:
             clause.resolved_path = primary_file
         elif clause.action == ClauseAction.WRITE_DERIVED_FILE and primary_file:
             clause.source_path = primary_file
-            clause.resolved_path = primary_file
+            if not clause.resolved_path:
+                clause.resolved_path = primary_file
+        if (
+            clause.content_from_heading
+            and primary_file
+            and primary_file.lower().endswith((".html", ".htm"))
+        ):
+            clause.content_source_path = primary_file
 
     plan.artifacts = []
     for clause in plan.clauses:
@@ -406,6 +480,13 @@ def _reconcile_plan_with_intent(
                 path=clause.resolved_path,
             )
         elif clause.action == ClauseAction.WRITE_FILE and clause.resolved_path:
+            _register_artifact(
+                plan.artifacts,
+                step_id=clause.clause_id,
+                action=clause.action,
+                path=clause.resolved_path,
+            )
+        elif clause.action == ClauseAction.WRITE_DERIVED_FILE and clause.resolved_path:
             _register_artifact(
                 plan.artifacts,
                 step_id=clause.clause_id,
@@ -455,6 +536,21 @@ def build_compound_plan(user_content: str, intent: WorkspaceIntent | None = None
             pending_file = named_file_match.group(1)
             clause.named_file = pending_file
 
+        explicit_filename = extract_explicit_filename_from_clause(clause_text)
+        if explicit_filename:
+            clause.explicit_filename = explicit_filename
+
+        content_heading = extract_content_source_heading(clause_text)
+        if content_heading:
+            clause.content_from_heading = content_heading
+            html_source = _resolve_reference_path(
+                clause,
+                plan.artifacts,
+                prefer_html=True,
+            )
+            if html_source:
+                clause.content_source_path = html_source
+
         literal = extract_literal_text_content(clause_text)
         if literal:
             clause.literal_text = literal
@@ -465,12 +561,25 @@ def build_compound_plan(user_content: str, intent: WorkspaceIntent | None = None
         if replacement:
             clause.replace_from, clause.replace_to = replacement
 
+        insert_info = extract_tag_insert_from_clause(clause_text)
+        if insert_info:
+            after_tag, insert_tag, insert_text = insert_info
+            clause.after_tag = after_tag
+            clause.insert_tag = insert_tag
+            clause.insert_heading_text = insert_text
+            if after_tag.startswith("h") and after_tag[1:].isdigit():
+                clause.after_heading_level = int(after_tag[1:])
+            if insert_tag.startswith("h") and insert_tag[1:].isdigit():
+                clause.insert_heading_level = int(insert_tag[1:])
+
         if action == ClauseAction.WRITE_DERIVED_FILE:
-            clause.naming_source = "h1" if re.search(
-                r"\bh1(?:-tag)?\b|überschrift|heading",
-                clause_text,
-                re.IGNORECASE,
-            ) else "content"
+            tag_source = parse_tag_reference(clause_text)
+            if tag_source:
+                clause.naming_source = tag_source
+            elif re.search(r"\büberschrift\b|\bheading\b", clause_text, re.IGNORECASE):
+                clause.naming_source = "h1"
+            else:
+                clause.naming_source = "content"
             ext_match = re.search(r"\.(txt|md|json|csv)\b|dateiendung\s*\.(\w+)", clause_text, re.I)
             if ext_match:
                 clause.derived_extension = "." + (ext_match.group(1) or ext_match.group(2)).lower()
@@ -478,6 +587,12 @@ def build_compound_plan(user_content: str, intent: WorkspaceIntent | None = None
                 clause.derived_extension = ".txt"
 
         resolved = clause.explicit_path
+        if not resolved and clause.explicit_filename and action == ClauseAction.WRITE_FILE:
+            resolved = resolve_write_path(
+                clause.explicit_filename,
+                primary_dir,
+                primary_file,
+            )
         if not resolved:
             resolved = _resolve_reference_path(
                 clause,
@@ -543,14 +658,20 @@ def build_compound_plan(user_content: str, intent: WorkspaceIntent | None = None
             clause.action == ClauseAction.WRITE_DERIVED_FILE for clause in plan.clauses
         )
         if not has_derived:
+            naming_source = "h1"
+            for clause_text in reversed(split_into_clauses(user_content)):
+                if not _is_derived_file_clause(clause_text):
+                    continue
+                naming_source = parse_tag_reference(clause_text) or naming_source
+                break
             plan.clauses.append(
                 CompoundClause(
                     clause_id=len(plan.clauses) + 1,
-                    text="derived file from HTML H1",
+                    text="derived file from HTML heading",
                     action=ClauseAction.WRITE_DERIVED_FILE,
                     resolved_path=primary_file,
                     source_path=primary_file,
-                    naming_source="h1",
+                    naming_source=naming_source,
                     derived_extension=".txt",
                     references_created_html=True,
                 )

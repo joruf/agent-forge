@@ -14,6 +14,14 @@ from agentforge.agents.workspace_intent import WorkspaceIntent, extract_named_fo
 from agentforge.config import settings
 from agentforge.tools.registry import WriteFileTool, _resolve_path, normalize_workspace_relative_path
 from agentforge.utils.document_io import is_document_path, read_document_text
+from agentforge.utils.html_tags import (
+    CONTENT_FROM_TAG,
+    TAG_LITERAL_IN_REQUEST,
+    extract_tag_insert_from_clause,
+    extract_tag_text_from_html,
+    insert_tag_after_tag,
+    parse_tag_reference,
+)
 from agentforge.utils.optional_deps import OptionalDependencyError
 
 REQUESTED_FILE = re.compile(
@@ -29,11 +37,13 @@ LITERAL_TEXT = re.compile(
     r'(?:text|inhalt|content|schreib(?:e|en|st)?|write(?:s|ing)?)\s+["\«„]([^"\»""]+)["\»""]',
     re.IGNORECASE,
 )
-H1_LITERAL = re.compile(
-    r'(?:text|inhalt)\s+["\«„]([^"\»""]+)["\»""]\s*(?:als\s+)?(?:h1(?:-tag)?|überschrift)',
-    re.IGNORECASE,
-)
+H1_LITERAL = TAG_LITERAL_IN_REQUEST
 H1_TAG = re.compile(r"<h1\b[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+HEADING_TAG = re.compile(
+    r"<h([1-6])\b[^>]*>(.*?)</h\1>",
+    re.IGNORECASE | re.DOTALL,
+)
+CONTENT_SOURCE_TAG = CONTENT_FROM_TAG
 STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style>", re.IGNORECASE | re.DOTALL)
 ABSOLUTE_ASSET = re.compile(
     r"""(?P<attr>href|src)=["'](?P<path>/[^"']+\.(?:css|js))["']""",
@@ -43,6 +53,11 @@ EXTERNAL_SCRIPT = re.compile(
     r"""<script\b[^>]*\bsrc=["']https?://[^"']+["'][^>]*>\s*</script>""",
     re.IGNORECASE,
 )
+EXPLICIT_BARE_FILENAME = re.compile(
+    r"\b(?:txt\s+)?datei\s+([\w.-]+\.\w+)\b",
+    re.IGNORECASE,
+)
+CONTENT_SOURCE_HEADING = CONTENT_SOURCE_TAG
 
 
 def extract_literal_text_content(user_content: str) -> str | None:
@@ -59,6 +74,100 @@ def extract_literal_text_content(user_content: str) -> str | None:
     return text or None
 
 
+def extract_explicit_filename_from_clause(clause: str) -> str | None:
+    """
+    Extract an explicit bare filename such as ``1.txt`` from one clause.
+
+    :param clause: Prompt clause text
+    :return: Filename including extension or None
+    """
+    match = EXPLICIT_BARE_FILENAME.search(clause or "")
+    if not match:
+        return None
+    filename = match.group(1).strip()
+    return filename or None
+
+
+def extract_content_source_tag(clause: str) -> str | None:
+    """
+    Extract an HTML tag whose text should populate a write target.
+
+    :param clause: Prompt clause text
+    :return: Tag name such as h1, p, or div, or None
+    """
+    match = CONTENT_SOURCE_TAG.search(clause or "")
+    if not match:
+        return None
+    return match.group(1).lower()
+
+
+def extract_content_source_heading(clause: str) -> str | None:
+    """
+    Extract an HTML tag whose text should populate a write target.
+
+    :param clause: Prompt clause text
+    :return: Tag name such as h1 or None
+    """
+    return extract_content_source_tag(clause)
+
+
+def resolve_write_path(
+    filename: str,
+    primary_dir: str | None,
+    primary_file: str | None,
+) -> str:
+    """
+    Resolve a bare filename against the current workflow directory context.
+
+    :param filename: Bare filename or workspace-relative path
+    :param primary_dir: Workspace-relative directory from the plan
+    :param primary_file: Primary deliverable file path
+    :return: Workspace-relative write path
+    """
+    if "/" in filename:
+        return filename
+    if primary_dir:
+        return f"{primary_dir}/{filename}"
+    if primary_file:
+        parent = str(Path(primary_file).parent)
+        if parent and parent not in {"", "."}:
+            return f"{parent}/{filename}"
+    return filename
+
+
+def plan_write_body_from_html_source(html_content: str, tag_name: str) -> str | None:
+    """
+    Build a text file body from one HTML element inside HTML content.
+
+    :param html_content: HTML document body
+    :param tag_name: HTML tag name such as h1, p, or strong
+    :return: Plain-text body with trailing newline or None
+    """
+    text = extract_tag_text_from_html(html_content, tag_name)
+    if not text:
+        return None
+    return text if text.endswith("\n") else f"{text}\n"
+
+
+def extract_literal_tag_text_from_request(user_content: str) -> str | None:
+    """
+    Extract literal element body text requested in natural language.
+
+    :param user_content: User message text
+    :return: Literal text or None
+    """
+    text = user_content or ""
+    match = TAG_LITERAL_IN_REQUEST.search(text)
+    if match:
+        body = match.group(1).strip()
+        return body or None
+    if parse_tag_reference(text) or re.search(r"\büberschrift\b|\bheading\b", text, re.IGNORECASE):
+        literal = extract_literal_text_content(text)
+        if literal:
+            return literal
+    return None
+
+
 def extract_h1_text_from_request(user_content: str) -> str | None:
     """
     Extract literal H1 body text requested in natural language.
@@ -66,16 +175,20 @@ def extract_h1_text_from_request(user_content: str) -> str | None:
     :param user_content: User message text
     :return: H1 text or None
     """
-    text = user_content or ""
-    match = H1_LITERAL.search(text)
-    if match:
-        h1_text = match.group(1).strip()
-        return h1_text or None
-    if re.search(r"\bh1(?:-tag)?\b|überschrift|\bheading\b", text, re.IGNORECASE):
-        literal = extract_literal_text_content(text)
-        if literal:
-            return literal
-    return None
+    return extract_literal_tag_text_from_request(user_content)
+
+
+def extract_hN_text(html: str, level: int) -> str | None:
+    """
+    Extract the first HN element text from HTML content.
+
+    :param html: HTML document body
+    :param level: Heading level 1-6
+    :return: Plain heading text or None
+    """
+    if level < 1 or level > 6:
+        return None
+    return extract_tag_text_from_html(html, f"h{level}")
 
 
 def extract_h1_text(html: str) -> str | None:
@@ -85,12 +198,7 @@ def extract_h1_text(html: str) -> str | None:
     :param html: HTML document body
     :return: Plain H1 text or None
     """
-    match = H1_TAG.search(html or "")
-    if not match:
-        return None
-    text = re.sub(r"<[^>]+>", "", match.group(1))
-    text = re.sub(r"\s+", " ", text).strip()
-    return text or None
+    return extract_tag_text_from_html(html, "h1")
 
 
 def sanitize_filename_from_text(text: str) -> str:
@@ -107,6 +215,46 @@ def sanitize_filename_from_text(text: str) -> str:
     return cleaned[:120]
 
 
+def plan_derived_txt_from_tag(
+    relative_html_path: str,
+    html_content: str,
+    naming_source: str = "h1",
+) -> tuple[str, str] | None:
+    """
+    Plan a .txt deliverable named after text inside an HTML element.
+
+    :param relative_html_path: Workspace-relative HTML path
+    :param html_content: HTML file body
+    :param naming_source: HTML tag name such as h1, p, or strong
+    :return: Tuple of (relative_txt_path, txt_body) or None
+    """
+    source = (naming_source or "h1").lower()
+    element_text = extract_tag_text_from_html(html_content, source)
+    if not element_text:
+        return None
+    parent = str(Path(relative_html_path).parent)
+    basename = sanitize_filename_from_text(element_text)
+    relative_txt = f"{parent}/{basename}.txt" if parent not in {"", "."} else f"{basename}.txt"
+    body = element_text if element_text.endswith("\n") else f"{element_text}\n"
+    return relative_txt, body
+
+
+def plan_derived_txt_from_heading(
+    relative_html_path: str,
+    html_content: str,
+    naming_source: str = "h1",
+) -> tuple[str, str] | None:
+    """
+    Plan a .txt deliverable named after text inside an HTML element.
+
+    :param relative_html_path: Workspace-relative HTML path
+    :param html_content: HTML file body
+    :param naming_source: HTML tag name such as h1, h2, or p
+    :return: Tuple of (relative_txt_path, txt_body) or None
+    """
+    return plan_derived_txt_from_tag(relative_html_path, html_content, naming_source)
+
+
 def plan_derived_txt_from_h1(relative_html_path: str, html_content: str) -> tuple[str, str] | None:
     """
     Plan a .txt deliverable named after the first H1 in HTML content.
@@ -115,14 +263,98 @@ def plan_derived_txt_from_h1(relative_html_path: str, html_content: str) -> tupl
     :param html_content: HTML file body
     :return: Tuple of (relative_txt_path, txt_body) or None
     """
-    h1_text = extract_h1_text(html_content)
-    if not h1_text:
+    return plan_derived_txt_from_heading(relative_html_path, html_content, naming_source="h1")
+
+
+def extract_html_tag_insert_from_clause(
+    clause_text: str,
+) -> tuple[str, str, str] | tuple[int, int, str] | None:
+    """
+    Extract an HTML element insertion request from one clause.
+
+    :param clause_text: Prompt clause text
+    :return: Tuple of (after_tag, insert_tag, text) or None
+    """
+    parsed = extract_tag_insert_from_clause(clause_text)
+    if not parsed:
         return None
-    parent = str(Path(relative_html_path).parent)
-    basename = sanitize_filename_from_text(h1_text)
-    relative_txt = f"{parent}/{basename}.txt" if parent not in {"", "."} else f"{basename}.txt"
-    body = h1_text if h1_text.endswith("\n") else f"{h1_text}\n"
-    return relative_txt, body
+    after_tag, insert_tag, text = parsed
+    if after_tag.startswith("h") and after_tag[1:].isdigit() and insert_tag.startswith("h") and insert_tag[1:].isdigit():
+        return int(after_tag[1:]), int(insert_tag[1:]), text
+    return after_tag, insert_tag, text
+
+
+def insert_heading_after_heading(
+    html: str,
+    after_level: int,
+    insert_level: int,
+    text: str,
+) -> str:
+    """
+    Insert a new heading element immediately after an existing heading.
+
+    :param html: HTML document body
+    :param after_level: Existing heading level to insert after
+    :param insert_level: New heading level to insert
+    :param text: Visible heading text
+    :return: Updated HTML document
+    """
+    return insert_tag_after_tag(html, f"h{after_level}", f"h{insert_level}", text)
+
+
+async def apply_html_tag_insertion(
+    relative_path: str,
+    after_tag: str,
+    insert_tag: str,
+    text: str,
+) -> tuple[bool, str]:
+    """
+    Insert an HTML element into a workspace HTML file and write the result back.
+
+    :param relative_path: Workspace-relative file path
+    :param after_tag: Existing element tag name to insert after
+    :param insert_tag: New element tag name to insert
+    :param text: Visible element text
+    :return: Tuple of success flag and summary or error message
+    """
+    success, content = read_workspace_file(relative_path)
+    if not success:
+        return False, content
+    existing = extract_tag_text_from_html(content, insert_tag)
+    if existing == text:
+        return True, f"Element <{insert_tag}> already present in {relative_path}"
+    updated = insert_tag_after_tag(content, after_tag, insert_tag, text)
+    if updated == content:
+        return False, f"Could not find <{after_tag}> in {relative_path}"
+    write_ok, output = await write_file_direct(relative_path, updated)
+    if not write_ok:
+        return False, output
+    return True, (
+        f'Inserted <{insert_tag}> "{text}" under <{after_tag}> in {relative_path}'
+    )
+
+
+async def apply_html_heading_insertion(
+    relative_path: str,
+    after_level: int,
+    insert_level: int,
+    text: str,
+) -> tuple[bool, str]:
+    """
+    Insert a heading into a workspace HTML file and write the result back.
+
+    :param relative_path: Workspace-relative file path
+    :param after_level: Existing heading level to insert after
+    :param insert_level: New heading level to insert
+    :param text: Visible heading text
+    :return: Tuple of success flag and summary or error message
+    """
+    return await apply_html_tag_insertion(
+        relative_path,
+        f"h{after_level}",
+        f"h{insert_level}",
+        text,
+    )
 
 
 def build_deliverable_status_summary(user_content: str, intent: WorkspaceIntent) -> str:
