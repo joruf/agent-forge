@@ -205,7 +205,7 @@ class SingleAgentMixin:
             if fallback and self._is_weak_discussion_content(content):
                 content = fallback
         if workspace_intent.wants_file_creation and workspace_intent.wants_file_read:
-            refreshed = await self._refresh_reads_after_writes(
+            pipeline_summary, refreshed = await self._execute_workspace_agenda_pipeline(
                 chat_id,
                 user_content,
                 workspace_intent,
@@ -213,13 +213,8 @@ class SingleAgentMixin:
                 on_event,
                 prefetched_reads,
             )
-            await self._apply_agenda_edits(
-                chat_id,
-                user_content,
-                workspace_intent,
-                task_state,
-                on_event,
-            )
+            if pipeline_summary and on_event:
+                await on_event({"type": "agent_message", "content": pipeline_summary})
             read_summary = build_final_response_from_task_state(task_state)
             if not read_summary:
                 read_summary = build_read_task_summary(

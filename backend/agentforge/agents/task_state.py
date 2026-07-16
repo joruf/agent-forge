@@ -7,8 +7,10 @@ import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from agentforge.agents.compound_planner import build_compound_plan, format_compound_plan_block
 from agentforge.agents.workspace_agenda import (
     AgendaAction,
     build_workspace_agenda,
@@ -258,6 +260,8 @@ def _assignee_for_agenda_action(action: AgendaAction) -> str:
     if action == AgendaAction.EDIT_FILE:
         return "developer"
     if action in {AgendaAction.CREATE_DIRECTORY, AgendaAction.WRITE_FILE}:
+        return "developer"
+    if action == AgendaAction.WRITE_DERIVED_FILE:
         return "developer"
     return "project_manager"
 
@@ -709,6 +713,32 @@ def check_completion(task_state: TaskState) -> CompletionReport:
                 reason="Missing verified file edits",
                 missing=missing_edits,
             )
+        derived_steps = [
+            step
+            for step in agenda
+            if step.action == AgendaAction.WRITE_DERIVED_FILE and step.source_path
+        ]
+        if derived_steps:
+            written_all = {
+                fact.path
+                for fact in task_state.verified_facts("file_written")
+                if fact.path
+            }
+            for step in derived_steps:
+                parent = str(Path(step.source_path).parent)
+                prefix = f"{parent}/" if parent not in {"", "."} else ""
+                has_derived = any(
+                    path.endswith(".txt")
+                    and path.startswith(prefix)
+                    and path in written_all
+                    for path in written_all
+                )
+                if not has_derived:
+                    return CompletionReport(
+                        complete=False,
+                        reason="Missing derived .txt file from H1 content",
+                        missing=[f"{step.source_path} → *.txt"],
+                    )
         return CompletionReport(complete=True)
 
     if task_state.task_type == TaskType.LIST_DIRECTORY:
@@ -996,6 +1026,14 @@ def format_task_plan_block(task_state: TaskState) -> str:
     )
     if agenda_block:
         lines.append(agenda_block)
+    compound_block = format_compound_plan_block(
+        build_compound_plan(
+            processing_content,
+            detect_workspace_intent(processing_content),
+        )
+    )
+    if compound_block:
+        lines.append(compound_block)
     else:
         lines.append("Plan:")
         for step in task_state.plan_steps:
@@ -1252,6 +1290,33 @@ def _step_is_complete(
             for fact in task_state.verified_facts("file_edited")
             if fact.path
         )
+    if action == "write_derived_file":
+        processing_content = task_state.interpreted_request or task_state.user_request
+        intent = detect_workspace_intent(processing_content)
+        agenda = build_workspace_agenda(processing_content, intent)
+        derived_steps = [
+            step
+            for step in agenda
+            if step.action == AgendaAction.WRITE_DERIVED_FILE and step.source_path
+        ]
+        if not derived_steps:
+            return True
+        written_all = {
+            fact.path
+            for fact in task_state.verified_facts("file_written")
+            if fact.path
+        }
+        for step in derived_steps:
+            parent = str(Path(step.source_path).parent)
+            prefix = f"{parent}/" if parent not in {"", "."} else ""
+            if not any(
+                candidate.endswith(".txt")
+                and candidate.startswith(prefix)
+                and candidate in written_all
+                for candidate in written_all
+            ):
+                return False
+        return True
     if action == "list_directory":
         return bool(task_state.verified_facts("directory_listing"))
     if action in {"run_command", "execute_command"}:

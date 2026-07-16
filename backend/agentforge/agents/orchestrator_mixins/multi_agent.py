@@ -37,6 +37,7 @@ from agentforge.agents.prompt_normalizer import (
     PromptNormalizationResult,
     format_prompt_normalization_block,
 )
+from agentforge.agents.compound_planner import build_compound_plan, format_compound_plan_block
 from agentforge.agents.workspace_agenda import AgendaAction, build_workspace_agenda
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.agents.workspace_executor import (
@@ -472,7 +473,7 @@ class MultiAgentMixin:
             task_state=task_state,
         )
         developer_impl_done = impl_discussion is not None
-        prefetched_reads = await self._refresh_reads_after_writes(
+        pipeline_summary, prefetched_reads = await self._execute_workspace_agenda_pipeline(
             chat_id,
             user_content,
             workspace_intent,
@@ -480,15 +481,13 @@ class MultiAgentMixin:
             on_event,
             prefetched_reads,
         )
-        edit_summary = await self._apply_agenda_edits(
-            chat_id,
-            user_content,
-            workspace_intent,
-            task_state,
-            on_event,
+        if pipeline_summary:
+            transcript.append(f"System: {pipeline_summary}")
+        compound_block = format_compound_plan_block(
+            build_compound_plan(user_content, workspace_intent),
         )
-        if edit_summary:
-            transcript.append(f"System: {edit_summary}")
+        if compound_block:
+            transcript.append(compound_block)
 
         if prefetched_reads:
             read_lines = [
@@ -689,13 +688,16 @@ class MultiAgentMixin:
         )
 
         if task_state and task_state.task_type == WorkspaceTaskType.WORKFLOW:
-            await self._apply_agenda_edits(
+            retry_summary, prefetched_reads = await self._execute_workspace_agenda_pipeline(
                 chat_id,
                 user_content,
                 workspace_intent,
                 task_state,
                 on_event,
+                prefetched_reads,
             )
+            if retry_summary:
+                transcript.append(f"System: {retry_summary}")
         else:
             prefetched_reads = await self._refresh_reads_after_writes(
                 chat_id,

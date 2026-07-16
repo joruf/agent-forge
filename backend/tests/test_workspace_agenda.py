@@ -16,7 +16,7 @@ TEST12_WORKFLOW_PROMPT = (
     f"erstelle mir einen Ordner mit dem Namen Test12\n"
     f"im Verzeichnis\n{WORKSPACE}\n"
     f"darin eine Datei mit dem Namen index.html\n"
-    f'darin fügst du in html code den text "Hello World" hinzu.\n'
+    f'darin fügst du in html code den text "Hello World" als H1-Tag hinzu.\n'
     f"lese danach die Datei {WORKSPACE}/index.html aus und geb den Inhalt hier im Prompt aus.\n"
     f'bearbeite danach die {WORKSPACE}/index.html und tausche "Hello World" aus gegen "Hello Bot".'
 )
@@ -38,6 +38,26 @@ def test_test12_workflow_agenda_order() -> None:
     assert agenda[3].path == "GitHub/Test12/index.html"
     assert agenda[3].replace_from == "Hello World"
     assert agenda[3].replace_to == "Hello Bot"
+
+
+DERIVED_TXT_PROMPT = (
+    TEST12_WORKFLOW_PROMPT
+    + "\nerstelle danach eine neue datei. Die Datei hat den Namen des Inhalts des "
+    "H1-Tag der erstellten HTML-Datei und hat die Dateiendung .txt"
+)
+
+
+def test_test12_workflow_with_derived_txt_agenda_has_fifth_step() -> None:
+    """Compound prompts with H1-derived .txt append a write_derived_file step."""
+    intent = detect_workspace_intent(DERIVED_TXT_PROMPT)
+    agenda = build_workspace_agenda(DERIVED_TXT_PROMPT, intent)
+
+    assert intent.wants_derived_file is True
+    assert len(agenda) == 5
+    assert agenda[4].action == AgendaAction.WRITE_DERIVED_FILE
+    assert agenda[4].source_path == "GitHub/Test12/index.html"
+    assert agenda[4].naming_source == "h1"
+    assert agenda[4].derived_extension == ".txt"
 
 
 def test_test12_workflow_classified_as_workflow_task() -> None:

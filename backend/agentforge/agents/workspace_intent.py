@@ -19,6 +19,7 @@ class WorkspaceIntent:
     wants_directory_creation: bool = False
     wants_command_execution: bool = False
     wants_file_edit: bool = False
+    wants_derived_file: bool = False
     target_paths: list[str] = field(default_factory=list)
     target_dirs: list[str] = field(default_factory=list)
     raw_paths: list[str] = field(default_factory=list)
@@ -37,6 +38,7 @@ class WorkspaceIntent:
             or self.wants_directory_creation
             or self.wants_command_execution
             or self.wants_file_edit
+            or self.wants_derived_file
         )
 
     def build_prompt_addon(self) -> str:
@@ -56,6 +58,11 @@ class WorkspaceIntent:
                 lines.append(
                     "4. Edit the file on disk (write_file with replaced text) when the user "
                     "asked to replace or change content."
+                )
+            if self.wants_derived_file:
+                lines.append(
+                    "5. Create any follow-up file whose name is derived from file content "
+                    "(for example a .txt file named after the H1 text in HTML)."
                 )
             lines.append("Never skip steps. Never invent file contents.")
             if self.target_paths:
@@ -214,6 +221,20 @@ REPLACE_AGAINST = re.compile(
     re.IGNORECASE,
 )
 
+DERIVED_TXT_FROM_H1 = re.compile(
+    r"(?:"
+    r"(?:neue\s+)?datei.*?(?:namen|name).*?(?:h1|überschrift).*?(?:\.txt|dateiendung\s*\.txt)"
+    r"|"
+    r"(?:namen|name)\s+(?:des\s+)?(?:inhalts?\s+)?(?:des\s+)?(?:h1(?:-tag)?s?(?:\s+inhalts?)?|überschrift)"
+    r".*?(?:\.txt|dateiendung\s*\.txt|dateiendung)"
+    r"|"
+    r"(?:named|name(?:d)?\s+after).*?(?:h1|heading).*?(?:\.txt|txt\s+file)"
+    r"|"
+    r"file.*?named.*?h1.*?(?:\.txt|txt)"
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
+
 NAMED_FOLDER = re.compile(
     r"(?:"
     r"(?:ordner|verzeichnis|folder|directory)"
@@ -225,6 +246,19 @@ NAMED_FOLDER = re.compile(
     r"([\w.-]+)",
     re.IGNORECASE,
 )
+
+
+def detect_derived_filename_intent(user_content: str) -> bool:
+    """
+    Return True when the user wants a file named from HTML H1 content.
+
+    :param user_content: User message text
+    :return: Whether a derived filename step is required
+    """
+    text = user_content or ""
+    if not DERIVED_TXT_FROM_H1.search(text):
+        return False
+    return bool(re.search(r"\b(?:h1|überschrift|heading)\b", text, re.IGNORECASE))
 
 
 def extract_named_folder(user_content: str) -> str | None:
@@ -389,6 +423,7 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
     wants_directory_creation = wants_file_creation and bool(target_dirs)
     wants_list_directory = wants_list and not wants_file_read and not wants_file_creation
     wants_file_edit = detect_file_edit_intent(text)
+    wants_derived_file = detect_derived_filename_intent(text)
 
     named_folder = extract_named_folder(text)
     if named_folder and target_dirs and (
@@ -466,6 +501,7 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
         wants_directory_creation=wants_directory_creation,
         wants_command_execution=wants_command,
         wants_file_edit=wants_file_edit,
+        wants_derived_file=wants_derived_file,
         target_paths=target_paths,
         target_dirs=target_dirs,
         raw_paths=raw_paths,

@@ -38,6 +38,7 @@ from agentforge.agents.prompt_normalizer import (
     PromptNormalizationResult,
     format_prompt_normalization_block,
 )
+from agentforge.agents.compound_planner import build_compound_plan, format_compound_plan_block
 from agentforge.agents.workspace_agenda import AgendaAction, build_workspace_agenda
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.agents.workspace_executor import (
@@ -50,12 +51,15 @@ from agentforge.agents.workspace_executor import (
     file_exists_in_workspace,
     missing_requested_files,
     plan_deliverable_files,
+    plan_derived_txt_from_h1,
     prefetch_read_file_contents,
     prepare_deliverable_content,
+    read_workspace_file,
     strip_code_fences,
     write_file_direct,
 )
 from agentforge.config import settings
+from pathlib import Path
 from agentforge.llm.provider import LLMProvider
 from agentforge.memory.store import memory_store
 from agentforge.models.schemas import (
@@ -378,4 +382,182 @@ class DeliverablesMixin:
         if not applied:
             return ""
         return "Applied file edits:\n- " + "\n- ".join(applied)
+
+
+    async def _apply_agenda_derived_writes(
+        self,
+        chat_id: str,
+        user_content: str,
+        intent: WorkspaceIntent,
+        task_state: TaskState | None,
+        on_event: Callable | None,
+    ) -> str:
+        """
+        Create files whose names are derived from on-disk HTML content (e.g. H1 → .txt).
+
+        :param chat_id: Chat session ID
+        :param user_content: Original user request
+        :param intent: Parsed workspace intent
+        :param task_state: Shared task board
+        :param on_event: Optional WebSocket callback
+        :return: Summary of derived writes or empty string
+        """
+        if not intent.wants_derived_file and not any(
+            step.action == AgendaAction.WRITE_DERIVED_FILE
+            for step in build_workspace_agenda(user_content, intent)
+        ):
+            return ""
+
+        agenda = build_workspace_agenda(user_content, intent)
+        derived_steps = [
+            step for step in agenda if step.action == AgendaAction.WRITE_DERIVED_FILE
+        ]
+        if not derived_steps:
+            return ""
+
+        applied: list[str] = []
+        async with command_audit_scope(chat_id, "system", "System", on_event):
+            for step in derived_steps:
+                source_path = step.source_path
+                if not source_path:
+                    continue
+                success, html_content = read_workspace_file(source_path)
+                if not success:
+                    continue
+                planned = plan_derived_txt_from_h1(source_path, html_content)
+                if not planned:
+                    continue
+                derived_path, body = planned
+                extension = step.derived_extension or ".txt"
+                if extension != ".txt":
+                    derived_path = derived_path.rsplit(".", 1)[0] + extension
+                write_ok, _output = await write_file_direct(derived_path, body)
+                if not write_ok:
+                    continue
+                applied.append(
+                    f"Created `{derived_path}` named after H1 in `{source_path}`",
+                )
+                if task_state is not None:
+                    seed_write_facts(
+                        task_state,
+                        [derived_path],
+                        source="derived_from_h1",
+                    )
+                    if derived_path not in task_state.targets:
+                        task_state.targets.append(derived_path)
+
+        await emit_task_board_update(on_event, task_state)
+        if not applied:
+            return ""
+        return "Applied derived file writes:\n- " + "\n- ".join(applied)
+
+
+    async def _execute_workspace_agenda_pipeline(
+        self,
+        chat_id: str,
+        user_content: str,
+        intent: WorkspaceIntent,
+        task_state: TaskState | None,
+        on_event: Callable | None,
+        prefetched_reads: dict[str, str] | None = None,
+    ) -> tuple[str, dict[str, str]]:
+        """
+        Execute workspace agenda steps sequentially in plan order.
+
+        Reads, edits, and derived writes run only when reached in the ordered
+        agenda so cross-step associations stay consistent.
+
+        :param chat_id: Chat session ID
+        :param user_content: Original user request
+        :param intent: Parsed workspace intent
+        :param task_state: Shared task board
+        :param on_event: Optional WebSocket callback
+        :param prefetched_reads: Existing read cache to update
+        :return: Tuple of summary text and updated read cache
+        """
+        agenda = build_workspace_agenda(user_content, intent)
+        if not agenda:
+            return "", prefetched_reads or {}
+
+        reads = dict(prefetched_reads or {})
+        summaries: list[str] = []
+
+        async with command_audit_scope(chat_id, "system", "System", on_event):
+            for step in agenda:
+                if step.action == AgendaAction.CREATE_DIRECTORY and step.path:
+                    target = (settings.workspace_root / step.path).resolve()
+                    target.mkdir(parents=True, exist_ok=True)
+                    summaries.append(f"Ensured directory `{step.path}`")
+                    continue
+
+                if step.action == AgendaAction.WRITE_FILE and step.path:
+                    if not file_exists_in_workspace(step.path):
+                        body = prepare_deliverable_content(
+                            step.path,
+                            fallback_file_content(step.path, user_content),
+                            user_content,
+                            [step.path],
+                        )
+                        success, _output = await write_file_direct(step.path, body)
+                        if success and task_state is not None:
+                            seed_write_facts(task_state, [step.path], source="agenda_write")
+                    continue
+
+                if step.action == AgendaAction.READ_FILE and step.path:
+                    success, payload = read_workspace_file(step.path)
+                    if task_state is not None:
+                        seed_read_facts(
+                            task_state,
+                            {step.path: payload if success else f"[ERROR] {payload}"},
+                        )
+                    if success:
+                        reads[step.path] = payload
+                    summaries.append(f"Read `{step.path}` for chat output")
+                    continue
+
+                if step.action == AgendaAction.EDIT_FILE and step.path:
+                    if step.replace_from and step.replace_to:
+                        success, message = await apply_file_text_replacement(
+                            step.path,
+                            step.replace_from,
+                            step.replace_to,
+                        )
+                        if success and task_state is not None:
+                            seed_edit_facts(
+                                task_state,
+                                step.path,
+                                replace_from=step.replace_from,
+                                replace_to=step.replace_to,
+                            )
+                            summaries.append(message)
+                    continue
+
+                if step.action == AgendaAction.WRITE_DERIVED_FILE and step.source_path:
+                    success, html_content = read_workspace_file(step.source_path)
+                    if not success:
+                        continue
+                    planned = plan_derived_txt_from_h1(step.source_path, html_content)
+                    if not planned:
+                        continue
+                    derived_path, body = planned
+                    extension = step.derived_extension or ".txt"
+                    if extension != ".txt":
+                        derived_path = derived_path.rsplit(".", 1)[0] + extension
+                    write_ok, _output = await write_file_direct(derived_path, body)
+                    if write_ok and task_state is not None:
+                        seed_write_facts(
+                            task_state,
+                            [derived_path],
+                            source="derived_from_h1",
+                        )
+                        if derived_path not in task_state.targets:
+                            task_state.targets.append(derived_path)
+                        summaries.append(
+                            f"Created `{derived_path}` named after H1 in `{step.source_path}`",
+                        )
+
+        await emit_task_board_update(on_event, task_state)
+        if not summaries:
+            return "", reads
+        return "Agenda pipeline:\n- " + "\n- ".join(summaries), reads
 

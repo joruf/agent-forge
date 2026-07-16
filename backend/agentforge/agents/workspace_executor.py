@@ -27,6 +27,11 @@ LITERAL_TEXT = re.compile(
     r'(?:text|inhalt|content|schreib(?:e|en|st)?|write(?:s|ing)?)\s+["\«„]([^"\»""]+)["\»""]',
     re.IGNORECASE,
 )
+H1_LITERAL = re.compile(
+    r'(?:text|inhalt)\s+["\«„]([^"\»""]+)["\»""]\s*(?:als\s+)?(?:h1(?:-tag)?|überschrift)',
+    re.IGNORECASE,
+)
+H1_TAG = re.compile(r"<h1\b[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
 STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style>", re.IGNORECASE | re.DOTALL)
 ABSOLUTE_ASSET = re.compile(
     r"""(?P<attr>href|src)=["'](?P<path>/[^"']+\.(?:css|js))["']""",
@@ -50,6 +55,72 @@ def extract_literal_text_content(user_content: str) -> str | None:
         return None
     text = match.group(1).strip()
     return text or None
+
+
+def extract_h1_text_from_request(user_content: str) -> str | None:
+    """
+    Extract literal H1 body text requested in natural language.
+
+    :param user_content: User message text
+    :return: H1 text or None
+    """
+    text = user_content or ""
+    match = H1_LITERAL.search(text)
+    if match:
+        h1_text = match.group(1).strip()
+        return h1_text or None
+    if re.search(r"\bh1(?:-tag)?\b|überschrift|\bheading\b", text, re.IGNORECASE):
+        literal = extract_literal_text_content(text)
+        if literal:
+            return literal
+    return None
+
+
+def extract_h1_text(html: str) -> str | None:
+    """
+    Extract the first H1 element text from HTML content.
+
+    :param html: HTML document body
+    :return: Plain H1 text or None
+    """
+    match = H1_TAG.search(html or "")
+    if not match:
+        return None
+    text = re.sub(r"<[^>]+>", "", match.group(1))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or None
+
+
+def sanitize_filename_from_text(text: str) -> str:
+    """
+    Build a filesystem-safe basename from visible text.
+
+    :param text: Source text such as an H1 label
+    :return: Sanitized basename without extension
+    """
+    cleaned = re.sub(r"[^\w\s.-]", "", text, flags=re.UNICODE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().strip(".")
+    if not cleaned:
+        return "output"
+    return cleaned[:120]
+
+
+def plan_derived_txt_from_h1(relative_html_path: str, html_content: str) -> tuple[str, str] | None:
+    """
+    Plan a .txt deliverable named after the first H1 in HTML content.
+
+    :param relative_html_path: Workspace-relative HTML path
+    :param html_content: HTML file body
+    :return: Tuple of (relative_txt_path, txt_body) or None
+    """
+    h1_text = extract_h1_text(html_content)
+    if not h1_text:
+        return None
+    parent = str(Path(relative_html_path).parent)
+    basename = sanitize_filename_from_text(h1_text)
+    relative_txt = f"{parent}/{basename}.txt" if parent not in {"", "."} else f"{basename}.txt"
+    body = h1_text if h1_text.endswith("\n") else f"{h1_text}\n"
+    return relative_txt, body
 
 
 def build_deliverable_status_summary(user_content: str, intent: WorkspaceIntent) -> str:
@@ -334,6 +405,28 @@ def plan_deliverable_files(user_content: str, intent: WorkspaceIntent) -> list[s
     return [f"{base_dir}/output.txt"]
 
 
+def minimal_html_with_h1(h1_text: str) -> str:
+    """
+    Return a minimal HTML page containing one H1 element.
+
+    :param h1_text: Visible H1 text
+    :return: HTML document string
+    """
+    safe_title = h1_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return f"""<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{safe_title}</title>
+</head>
+<body>
+  <h1>{safe_title}</h1>
+</body>
+</html>
+"""
+
+
 def default_html_scaffold(
     css_href: str | None = None,
     js_src: str | None = None,
@@ -465,6 +558,9 @@ def _html_scaffold_for_request(user_content: str) -> str:
     :param user_content: Original user request
     :return: HTML document string
     """
+    h1_text = extract_h1_text_from_request(user_content)
+    if h1_text:
+        return minimal_html_with_h1(h1_text)
     matched = {spec.type_id for spec in match_deliverable_file_types(user_content or "")}
     css_href = "styles.css" if "css" in matched else None
     js_src = "app.js" if "javascript" in matched else None

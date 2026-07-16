@@ -221,6 +221,14 @@ def _should_skip_token(token: str) -> bool:
         return True
     if token.lower() in KEYWORD_LOOKUP:
         return True
+    if token.lower() in {
+        "erstellten",
+        "erstellte",
+        "erstellter",
+        "erstelltes",
+        "h1-tag",
+    }:
+        return True
     return False
 
 

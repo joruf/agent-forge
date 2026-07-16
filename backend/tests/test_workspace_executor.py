@@ -6,10 +6,14 @@ import pytest
 
 from agentforge.agents.workspace_executor import (
     build_implementation_prompt,
+    extract_h1_text,
+    extract_h1_text_from_request,
     fallback_file_content,
     infer_requested_files,
     missing_requested_files,
     plan_deliverable_files,
+    plan_derived_txt_from_h1,
+    sanitize_filename_from_text,
     strip_code_fences,
     write_file_direct,
 )
@@ -123,3 +127,31 @@ async def test_missing_requested_files_detects_absent_file(
     intent = detect_workspace_intent(prompt)
     missing = missing_requested_files(prompt, intent)
     assert missing == ["GitHub/Test/index.php"]
+
+
+def test_extract_h1_text_from_html() -> None:
+    """H1 text is extracted from HTML markup."""
+    html = "<!DOCTYPE html><html><body><h1>Hello Bot</h1></body></html>"
+    assert extract_h1_text(html) == "Hello Bot"
+
+
+def test_extract_h1_text_from_request() -> None:
+    """Natural-language H1 instructions extract the quoted label."""
+    assert extract_h1_text_from_request('füge den text "Hello World" als H1-Tag hinzu') == "Hello World"
+    prompt = (
+        'füge den text "Hello World" hinzu. '
+        "Erstelle danach eine txt-Datei mit dem Namen des H1-Tag Inhalts."
+    )
+    assert extract_h1_text_from_request(prompt) == "Hello World"
+
+
+def test_plan_derived_txt_from_h1() -> None:
+    """Derived txt path uses sanitized H1 text beside the HTML file."""
+    html = "<html><body><h1>Hello Bot</h1></body></html>"
+    planned = plan_derived_txt_from_h1("GitHub/Test12/index.html", html)
+    assert planned == ("GitHub/Test12/Hello Bot.txt", "Hello Bot\n")
+
+
+def test_sanitize_filename_from_text() -> None:
+    """Filename sanitization keeps readable words and strips unsafe characters."""
+    assert sanitize_filename_from_text('Hello "Bot"!') == "Hello Bot"

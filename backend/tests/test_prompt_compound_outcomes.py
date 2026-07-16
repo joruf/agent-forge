@@ -44,7 +44,7 @@ def _test12_workflow_prompt(
             f"erstlle mir einen Ordenr mit dem Namen Test12\n"
             f"im Verzeichnis\n{base}\n"
             f"darin eine Datei mit dem Namen index.htlm\n"
-            f'darin fügst du in html code den text "Hello World" hinzu.\n'
+            f'darin fügst du in html code den text "Hello World" als H1-Tag hinzu.\n'
             f"lees danach die Datei {read_target} aus und geb den Inhalt hier im Prompt aus.\n"
             f'bearbeitte danach die {edit_target} und tausche "Hello World" aus gegen "Hello Bot".'
         )
@@ -53,9 +53,29 @@ def _test12_workflow_prompt(
         f"erstelle mir einen Ordner mit dem Namen Test12\n"
         f"im Verzeichnis\n{base}\n"
         f"darin eine Datei mit dem Namen index.html\n"
-        f'darin fügst du in html code den text "Hello World" hinzu.\n'
+        f'darin fügst du in html code den text "Hello World" als H1-Tag hinzu.\n'
         f"lese danach die Datei {read_target} aus und gebe den Inhalt hier im Prompt aus.\n"
         f'bearbeite danach die {edit_target} und tausche "Hello World" aus gegen "Hello Bot".'
+    )
+
+
+def _test12_workflow_with_derived_txt_prompt(
+    workspace: Path,
+    *,
+    wrong_paths: bool = True,
+) -> str:
+    """
+    Build the full six-step Test12 workflow including H1-named .txt creation.
+
+    :param workspace: Temp workspace root
+    :param wrong_paths: Use GitHub/index.html instead of GitHub/Test12/index.html
+    :return: User prompt text
+    """
+    base_prompt = _test12_workflow_prompt(workspace, typos=False, wrong_paths=wrong_paths)
+    return (
+        f"{base_prompt}\n"
+        "erstelle danach eine neue datei. Die Datei hat den Namen des Inhalts des "
+        "H1-Tag der erstellten HTML-Datei und hat die Dateiendung .txt"
     )
 
 
@@ -112,6 +132,34 @@ async def test_wrong_path_workflow_resolves_test12_index_end_to_end(
     assert "Hello Bot" in content
     assert not (temp_workspace / "GitHub" / "index.html").exists()
     assert_final_message_contains(result, "GitHub/Test12/index.html")
+
+
+@pytest.mark.asyncio
+async def test_six_step_workflow_creates_h1_named_txt_after_edit(
+    monkeypatch,
+    temp_workspace: Path,
+) -> None:
+    """After edit, a .txt file is created using the post-edit H1 text as its basename."""
+    (temp_workspace / "GitHub").mkdir()
+    prompt = _test12_workflow_with_derived_txt_prompt(temp_workspace, wrong_paths=True)
+
+    intent = detect_workspace_intent(normalize_user_prompt(prompt).normalized)
+    assert intent.wants_derived_file is True
+
+    result = await run_orchestration(
+        monkeypatch,
+        temp_workspace,
+        prompt,
+        agent_loop=make_team_loop(role_responses={"developer": '{"status": "success"}'}),
+    )
+
+    html_path = temp_workspace / "GitHub" / "Test12" / "index.html"
+    txt_path = temp_workspace / "GitHub" / "Test12" / "Hello Bot.txt"
+    assert html_path.is_file()
+    assert "Hello Bot" in html_path.read_text(encoding="utf-8")
+    assert txt_path.is_file()
+    assert txt_path.read_text(encoding="utf-8").strip() == "Hello Bot"
+    assert_final_message_contains(result, "Hello Bot.txt", "GitHub/Test12/index.html")
 
 
 @pytest.mark.asyncio
