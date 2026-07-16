@@ -199,7 +199,7 @@ CODE_EXTENSIONS = re.compile(
 )
 
 REQUESTED_FILE_NAME = re.compile(
-    r"\b([\w.-]+\.(?:php|html|htm|css|js|ts|tsx|jsx|py|md|json|txt|vue|sql|xml|yaml|yml|sh))\b",
+    r"\b([\w.-]+\.(?:php|html|htm|css|js|ts|tsx|jsx|py|md|json|txt|vue|sql|xml|yaml|yml|sh|pdf|docx))\b",
     re.IGNORECASE,
 )
 

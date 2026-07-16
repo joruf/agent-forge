@@ -91,6 +91,14 @@ RELATIVE_DIR = "GitHub/Project"
             f"Erstelle xml Datei und speichere unter {BASE_DIR}",
             "data.xml",
         ),
+        (
+            f"Erstelle Word Dokument und speichere unter {BASE_DIR}",
+            "document.docx",
+        ),
+        (
+            f"Create pdf document and save to {BASE_DIR}",
+            "document.pdf",
+        ),
     ],
 )
 def test_plan_deliverable_files_infers_type_from_context(
@@ -111,6 +119,8 @@ def test_plan_deliverable_files_infers_type_from_context(
         ("Erstelle TypeScript Datei", "typescript", ".ts"),
         ("Create stylesheet", "css", ".css"),
         ("tsx component", "tsx", ".tsx"),
+        ("Erstelle Word Dokument", "docx", ".docx"),
+        ("Create pdf document", "pdf", ".pdf"),
     ],
 )
 def test_match_deliverable_file_type(

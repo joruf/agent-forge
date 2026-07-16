@@ -8,6 +8,8 @@ from typing import Any
 from agentforge.config import settings
 from agentforge.i18n import t
 from agentforge.models.schemas import ToolCallResult
+from agentforge.utils.document_io import is_document_path, read_document_text, write_document_text
+from agentforge.utils.optional_deps import OptionalDependencyError
 from agentforge.tools.file_search import (
     FileAnchorStore,
     apply_file_edit,
@@ -91,8 +93,8 @@ class ReadFileTool(BaseTool):
 
     name = "read_file"
     description = (
-        "Read a text file from the workspace. "
-        "Use start_line/end_line for partial reads with line numbers."
+        "Read a file from the workspace (text, PDF, or Word .docx). "
+        "Use start_line/end_line for partial reads with line numbers on text files."
     )
 
     def schema(self) -> dict[str, Any]:
@@ -136,7 +138,15 @@ class ReadFileTool(BaseTool):
                 output = f"File not found: {path}"
                 await record_read_file(relative_path, output=output, success=False)
                 return ToolCallResult(tool=self.name, success=False, output=output)
-            content = path.read_text(encoding="utf-8", errors="replace")
+            if is_document_path(path):
+                try:
+                    content = read_document_text(path)
+                except OptionalDependencyError as exc:
+                    output = str(exc)
+                    await record_read_file(relative_path, output=output, success=False)
+                    return ToolCallResult(tool=self.name, success=False, output=output)
+            else:
+                content = path.read_text(encoding="utf-8", errors="replace")
             lines = content.splitlines()
             start_line = arguments.get("start_line")
             end_line = arguments.get("end_line")
@@ -175,7 +185,8 @@ class WriteFileTool(BaseTool):
 
     name = "write_file"
     description = (
-        "Create or overwrite a text file in the workspace. "
+        "Create or overwrite a file in the workspace. "
+        "Supports plain text, PDF, and Word (.docx) documents. "
         "Use this whenever the user asks to save, create, or write files. "
         "Parent directories are created automatically."
     )
@@ -213,7 +224,20 @@ class WriteFileTool(BaseTool):
             created_dirs = _parents_to_create(relative_path)
             path = _resolve_path(relative_path)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(arguments["content"], encoding="utf-8")
+            if is_document_path(path):
+                try:
+                    write_document_text(path, str(arguments["content"]))
+                except OptionalDependencyError as exc:
+                    output = str(exc)
+                    await record_write_file(
+                        relative_path,
+                        output=output,
+                        success=False,
+                        created_dirs=created_dirs,
+                    )
+                    return ToolCallResult(tool=self.name, success=False, output=output)
+            else:
+                path.write_text(arguments["content"], encoding="utf-8")
             output = f"Written: {path}"
             result = ToolCallResult(tool=self.name, success=True, output=output)
             await record_write_file(

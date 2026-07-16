@@ -13,9 +13,11 @@ from agentforge.agents.deliverable_types import (
 from agentforge.agents.workspace_intent import WorkspaceIntent, extract_named_folder
 from agentforge.config import settings
 from agentforge.tools.registry import WriteFileTool, _resolve_path, normalize_workspace_relative_path
+from agentforge.utils.document_io import is_document_path, read_document_text
+from agentforge.utils.optional_deps import OptionalDependencyError
 
 REQUESTED_FILE = re.compile(
-    r"\b([\w.-]+\.(?:php|html|htm|css|js|ts|tsx|jsx|py|md|json|txt|vue|sql|xml|yaml|yml|sh))\b",
+    r"\b([\w.-]+\.(?:php|html|htm|css|js|ts|tsx|jsx|py|md|json|txt|vue|sql|xml|yaml|yml|sh|pdf|docx))\b",
     re.IGNORECASE,
 )
 NAMED_FILE = re.compile(
@@ -205,7 +207,13 @@ def read_workspace_file(relative_path: str) -> tuple[bool, str]:
         absolute = _resolve_path(relative_path)
         if not absolute.is_file():
             return False, f"File not found: {absolute}"
-        content = absolute.read_text(encoding="utf-8", errors="replace")
+        if is_document_path(absolute):
+            try:
+                content = read_document_text(absolute)
+            except OptionalDependencyError as exc:
+                return False, str(exc)
+        else:
+            content = absolute.read_text(encoding="utf-8", errors="replace")
         if len(content) > settings.max_output_chars:
             content = content[: settings.max_output_chars] + "\n... [truncated]"
         return True, content
@@ -781,6 +789,16 @@ def fallback_file_content(relative_path: str, user_content: str) -> str:
         literal = extract_literal_text_content(user_content)
         if literal is not None:
             return literal if literal.endswith("\n") else f"{literal}\n"
+    if suffix == ".docx":
+        literal = extract_literal_text_content(user_content)
+        if literal is not None:
+            return literal if literal.endswith("\n") else f"{literal}\n"
+        return "Generated document.\n"
+    if suffix == ".pdf":
+        literal = extract_literal_text_content(user_content)
+        if literal is not None:
+            return literal if literal.endswith("\n") else f"{literal}\n"
+        return "Generated PDF document.\n"
     return f"Generated for request:\n{user_content.strip()}\n"
 
 

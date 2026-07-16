@@ -62,6 +62,9 @@ EXTENSION_FIXES: dict[str, str] = {
     ".htmll": ".html",
     ".htl": ".html",
     ".txtt": ".txt",
+    ".pdff": ".pdf",
+    ".docxx": ".docx",
+    ".doc": ".docx",
     ".jss": ".js",
     ".csss": ".css",
 }

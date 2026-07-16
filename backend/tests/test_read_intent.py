@@ -18,6 +18,10 @@ READ_PROMPT = (
     "lese den dateiinhalt von /home/joruf/Dokumente/GitHub/Test12/test12345.txt "
     "und liste mir den inhalt hier auf"
 )
+READ_PDF_PROMPT = (
+    "lese den dateiinhalt von /home/joruf/Dokumente/GitHub/Test12/report.pdf "
+    "und zeige mir den Inhalt"
+)
 
 
 def test_detect_read_intent_not_file_creation() -> None:
@@ -28,6 +32,16 @@ def test_detect_read_intent_not_file_creation() -> None:
     assert intent.wants_file_creation is False
     assert intent.requires_tools is True
     assert "GitHub/Test12/test12345.txt" in intent.target_paths
+
+
+def test_detect_read_intent_for_pdf_filename() -> None:
+    """Read requests with explicit PDF filenames resolve the target path."""
+    intent = detect_workspace_intent(READ_PDF_PROMPT)
+
+    assert intent.wants_file_read is True
+    assert intent.wants_file_creation is False
+    assert intent.requires_tools is True
+    assert "GitHub/Test12/report.pdf" in intent.target_paths
 
 
 def test_detect_write_intent_still_works() -> None:

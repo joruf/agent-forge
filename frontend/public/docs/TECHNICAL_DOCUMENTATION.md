@@ -448,8 +448,8 @@ Messages are stored as `MessageRole.TOOL` with `metadata.kind = "shell_command"`
 
 | Tool name | Class | Description |
 |-----------|-------|-------------|
-| `read_file` | ReadFileTool | Read text file (truncation via `max_output_chars`) |
-| `write_file` | WriteFileTool | Write file, create parent dirs |
+| `read_file` | ReadFileTool | Read text, PDF, or Word `.docx` (truncation via `max_output_chars`) |
+| `write_file` | WriteFileTool | Write text, PDF, or Word `.docx`; create parent dirs |
 | `list_directory` | ListDirectoryTool | Directory listing |
 | `run_command` | ShellTool | Shell — **only** via Command Audit |
 | `remember` | RememberTool | Fact in chat memory |
@@ -457,6 +457,8 @@ Messages are stored as `MessageRole.TOOL` with `metadata.kind = "shell_command"`
 | `web_search` | WebSearchTool | Web search (when enabled) |
 
 All paths are relative to **`AGENTFORGE_WORKSPACE_ROOT`**; path traversal is rejected.
+
+**Document I/O:** `utils/document_io.py` handles `.pdf` and `.docx` via lazy-installed packages (`pypdf`, `python-docx`, `fpdf2`). `ReadFileTool`, `WriteFileTool`, and `read_workspace_file()` route document paths through these helpers; plain text files still use UTF-8 reads/writes.
 
 ### Tool Execution in Orchestrator
 
