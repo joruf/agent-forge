@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type {
+  AgentActivityItem,
   AgentMessage,
   AgentRole,
   ApprovalRequest,
@@ -22,7 +23,8 @@ import { ApprovalPanel } from "./ApprovalPanel";
 import { UserChoiceDialog } from "./UserChoiceDialog";
 import { ContextPluginLog } from "./ContextPluginLog";
 import { CommandHistoryModal } from "./CommandHistoryModal";
-import { TaskBoardPanel } from "./TaskBoardPanel";
+import { ChatWorkflowSidebar } from "./ChatWorkflowSidebar";
+import type { GrillPhaseState } from "./GrillPhasePanel";
 import { ExpandableText } from "./ExpandableText";
 import { DEFAULT_MULTI_ROLES, normalizeSingleRoleIds, SINGLE_AUTO_ROLE, sortSdlcRoles } from "../constants/roles";
 import { normalizeMemoryTokens } from "../constants/memory";
@@ -36,7 +38,9 @@ import {
   playNotificationPing,
   unlockNotificationAudio,
 } from "../utils/notificationSound";
-import { parseTaskBoardEvent, shouldShowTaskBoard } from "../utils/taskBoard";
+import { parseTaskBoardEvent } from "../utils/taskBoard";
+import { applyAgentActivityEvent } from "../utils/agentActivity";
+import { isGrillChat } from "../utils/grill";
 
 interface WorkingAgentInfo {
   roleName: string;
@@ -110,6 +114,7 @@ export function ChatPanel({
   const [liveDiscussions, setLiveDiscussions] = useState<AgentMessage[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [activeUserChoice, setActiveUserChoice] = useState<ApprovalRequest | null>(null);
+  const [userChoiceSubmitting, setUserChoiceSubmitting] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -134,8 +139,20 @@ export function ChatPanel({
   const [activeAgents, setActiveAgents] = useState<Map<string, ActiveAgentInfo>>(new Map());
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const [taskBoard, setTaskBoard] = useState<TaskBoardSnapshot | null>(null);
+  const [grillPhase, setGrillPhase] = useState<GrillPhaseState | null>(null);
+  const [agentActivities, setAgentActivities] = useState<AgentActivityItem[]>([]);
+  const [grillEnabled, setGrillEnabled] = useState(false);
   const panelMode = chat?.mode ?? draft?.mode ?? "single";
   const isQuickMode = panelMode === "quick";
+  const grillActive = isGrillChat(chat, draft) || grillPhase !== null;
+  const grillCheckboxLocked = Boolean(chat && messages.length > 0);
+  const hideAgentHistoryDuringGrill = Boolean(
+    grillActive
+    && grillPhase
+    && grillPhase.phase !== "execute"
+    && grillPhase.phase !== "test"
+    && grillPhase.phase !== "done",
+  );
   const shellCommandEntries = collectShellCommands(
     messages,
     approvals.filter((approval) => approval.action_type === "command"),
@@ -160,6 +177,12 @@ export function ChatPanel({
 
   const resolveRoleName = (roleId: string) =>
     orderedRoles.find((role) => role.id === roleId)?.name ?? roleId;
+
+  const trackAgentActivity = (event: Record<string, unknown>) => {
+    setAgentActivities((prev) =>
+      applyAgentActivityEvent(prev, event, { resolveRoleName, t }),
+    );
+  };
 
   useEffect(() => {
     loadingRef.current = loading;
@@ -189,6 +212,9 @@ export function ChatPanel({
     stickToBottomRef.current = true;
     setPendingShellCommands([]);
     setTaskBoard(null);
+    setGrillPhase(null);
+    setActiveUserChoice(null);
+    setUserChoiceSubmitting(false);
     if (!chat && !draft) {
       setMessages([]);
       setDiscussions([]);
@@ -201,6 +227,7 @@ export function ChatPanel({
     }
 
     if (chat) {
+      setGrillEnabled(chat.grill_enabled || chat.mode === "grill");
       if (chat.mode !== "quick") {
         setSelectedRoles(
           chat.mode === "single"
@@ -224,6 +251,7 @@ export function ChatPanel({
         ]);
         setMessages(msgs);
         setApprovals(pending);
+        syncPendingUserChoice(pending);
       })();
       return;
     }
@@ -237,6 +265,7 @@ export function ChatPanel({
             ? draft!.role_ids
             : [...DEFAULT_MULTI_ROLES],
     );
+    setGrillEnabled(draft!.grill_enabled);
     setExecutionStrategy(draft!.execution_strategy);
     setMessages([]);
     setDiscussions([]);
@@ -245,6 +274,7 @@ export function ChatPanel({
     setMessageErrors({});
     setSubmitError("");
     setContextPluginRuns([]);
+    setAgentActivities([]);
   }, [chat?.id, draft]);
 
   useEffect(() => {
@@ -338,6 +368,7 @@ export function ChatPanel({
       execution_strategy: executionStrategy,
       role_ids: roleIds,
       memory: chatMemorySettings,
+      ...(messages.length === 0 ? { grill_enabled: grillEnabled } : {}),
     });
     onChatUpdated(updated);
     return updated;
@@ -359,7 +390,176 @@ export function ChatPanel({
             : selectedRoles,
       execution_strategy: executionStrategy,
       memory: chatMemorySettings,
+      grill_enabled: grillEnabled,
     });
+  };
+
+  const syncPendingUserChoice = (pending: ApprovalRequest[]) => {
+    const nextChoice = pending.find(
+      (approval) => approval.action_type === "user_choice",
+    );
+    setActiveUserChoice(nextChoice ?? null);
+    return nextChoice ?? null;
+  };
+
+  const startGrillExecuteMonitoring = (activeChat: Chat) => {
+    activeRunRef.current += 1;
+    const runId = activeRunRef.current;
+    let completed = false;
+    setAgentActivities([]);
+
+    if (runTimeoutRef.current !== null) {
+      window.clearTimeout(runTimeoutRef.current);
+    }
+    runTimeoutRef.current = window.setTimeout(() => {
+      if (runId !== activeRunRef.current || completed) {
+        return;
+      }
+      wsRef.current?.close();
+      setLoading(false);
+      setWorkingAgent(null);
+      onChatRunStateChange(activeChat.id, "idle");
+      void markPromptFailed(t("chat.agentTimeout"), activeChat);
+    }, 600_000);
+
+    const finishGrillExecuteLoading = (outcome: "completed" | "idle" = "completed") => {
+      if (runId !== activeRunRef.current || completed) {
+        return;
+      }
+      completed = true;
+      if (runTimeoutRef.current !== null) {
+        window.clearTimeout(runTimeoutRef.current);
+        runTimeoutRef.current = null;
+      }
+      setLoading(false);
+      setWorkingAgent(null);
+      setActiveAgents(new Map());
+      setStreamingContent(null);
+      onChatRunStateChange(activeChat.id, outcome);
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
+
+    const refreshGrillExecuteState = () =>
+      Promise.all([
+        api.listMessages(activeChat.id).then(setMessages),
+        api.listApprovals(activeChat.id).then((pending) => {
+          setApprovals(pending);
+          syncPendingUserChoice(pending);
+        }),
+      ]);
+
+    const bindGrillExecuteHandlers = (ws: WebSocket) => {
+      ws.onmessage = (event) => {
+        if (runId !== activeRunRef.current) {
+          return;
+        }
+        const data = JSON.parse(event.data as string) as {
+          type: string;
+          message?: string;
+          content?: string;
+          agent_id?: string;
+          agent_name?: string;
+          routing?: { model?: string };
+          success?: boolean;
+          phase?: GrillPhaseState["phase"];
+          idea?: string;
+          question_count?: number;
+          has_plan?: boolean;
+          summary?: string;
+        };
+
+        trackAgentActivity(data as Record<string, unknown>);
+
+        if (data.type === "content_delta" && data.content) {
+          setStreamingContent((prev) => `${prev ?? ""}${data.content}`);
+        }
+
+        if (data.type === "agent_start" && data.agent_id && data.agent_name) {
+          setActiveAgents(new Map([
+            [data.agent_id, { roleId: data.agent_id, roleName: data.agent_name, model: null }],
+          ]));
+          setWorkingAgent({ roleName: data.agent_name, model: null });
+        }
+
+        if (data.type === "agent_end" && data.agent_id) {
+          setActiveAgents((prev) => {
+            const next = new Map(prev);
+            next.delete(data.agent_id!);
+            if (next.size === 0) {
+              setWorkingAgent(null);
+            }
+            return next;
+          });
+        }
+
+        if (data.type === "model_selected") {
+          const model = data.routing?.model
+            ? formatRoutingModel(String(data.routing.model))
+            : null;
+          const agentName =
+            data.agent_name
+            ?? (data.agent_id ? resolveRoleName(data.agent_id) : t("chat.assistant"));
+          setWorkingAgent({ roleName: agentName, model });
+        }
+
+        if (data.type === "task_board_updated") {
+          const snapshot = parseTaskBoardEvent(data);
+          if (snapshot) {
+            setTaskBoard(snapshot);
+          }
+        }
+
+        if (data.type === "grill_phase_updated" && data.phase) {
+          setGrillPhase({
+            phase: data.phase,
+            idea: typeof data.idea === "string" ? data.idea : "",
+            questionCount: typeof data.question_count === "number" ? data.question_count : 0,
+            hasPlan: Boolean(data.has_plan),
+            summary: typeof data.summary === "string" ? data.summary : "",
+          });
+          if (data.phase === "done") {
+            void refreshGrillExecuteState().then(() => finishGrillExecuteLoading("completed"));
+          }
+        }
+
+        if (data.type === "grill_execute_complete") {
+          void refreshGrillExecuteState().then(() =>
+            finishGrillExecuteLoading(data.success ? "completed" : "idle"),
+          );
+        }
+
+        if (data.type === "error") {
+          void markPromptFailed(data.message || t("chat.agentFailed"), activeChat);
+          finishGrillExecuteLoading("idle");
+        }
+      };
+
+      ws.onclose = () => {
+        if (runId !== activeRunRef.current || completed) {
+          return;
+        }
+        finishGrillExecuteLoading("idle");
+        if (!stoppedByUserRef.current) {
+          void markPromptFailed(t("chat.agentFailed"), activeChat);
+        }
+        stoppedByUserRef.current = false;
+      };
+    };
+
+    const existing = wsRef.current;
+    if (existing?.readyState === WebSocket.OPEN) {
+      bindGrillExecuteHandlers(existing);
+      return;
+    }
+
+    if (existing && existing.readyState !== WebSocket.CLOSED) {
+      existing.close();
+    }
+
+    const ws = new WebSocket(api.wsUrl(activeChat.id));
+    wsRef.current = ws;
+    bindGrillExecuteHandlers(ws);
   };
 
   const handleApproval = async (id: string, approved: boolean) => {
@@ -371,31 +571,94 @@ export function ChatPanel({
   };
 
   const handleUserChoice = async (approvalId: string, choiceId: string, comment = "") => {
-    if (!chat) return;
-    await api.respondApproval(chat.id, approvalId, true, comment, choiceId);
-    setApprovals((prev) => prev.filter((approval) => approval.id !== approvalId));
-    setActiveUserChoice(null);
-    setLoading(false);
-    setWorkingAgent(null);
-    setActiveAgents(new Map());
-    setStreamingContent(null);
-    onChatRunStateChange(chat.id, "idle");
-    const msgs = await api.listMessages(chat.id);
-    setMessages(msgs);
+    if (!chat || userChoiceSubmitting) return;
+    const approval = activeUserChoice;
+    const kind = typeof approval?.payload.kind === "string" ? approval.payload.kind : "";
+    const startsExecution = kind === "grill_plan_review" && choiceId === "approve_plan";
+    setUserChoiceSubmitting(true);
+    setLoading(true);
+    onChatRunStateChange(chat.id, "running");
+    if (startsExecution) {
+      startGrillExecuteMonitoring(chat);
+    }
+    if (kind === "grill_question") {
+      setGrillPhase((prev) =>
+        prev ? { ...prev, questionCount: prev.questionCount + 1 } : prev,
+      );
+    }
+    try {
+      if (startsExecution) {
+        await saveChatSettings(chat);
+      }
+      await api.respondApproval(chat.id, approvalId, true, comment, choiceId);
+      const [msgs, pending] = await Promise.all([
+        api.listMessages(chat.id),
+        api.listApprovals(chat.id),
+      ]);
+      setMessages(msgs);
+      setApprovals(pending);
+      syncPendingUserChoice(pending);
+      if (startsExecution) {
+        setGrillPhase((prev) => ({
+          phase: "execute",
+          idea: prev?.idea ?? "",
+          questionCount: prev?.questionCount ?? 0,
+          hasPlan: true,
+          summary: prev?.summary ?? "",
+        }));
+      }
+    } catch {
+      if (kind === "grill_question") {
+        setGrillPhase((prev) =>
+          prev ? { ...prev, questionCount: Math.max(0, prev.questionCount - 1) } : prev,
+        );
+      }
+      if (startsExecution) {
+        setLoading(false);
+        setWorkingAgent(null);
+        setActiveAgents(new Map());
+        setStreamingContent(null);
+        onChatRunStateChange(chat.id, "idle");
+        wsRef.current?.close();
+        wsRef.current = null;
+      }
+      setSubmitError(t("chat.agentFailed"));
+    } finally {
+      setUserChoiceSubmitting(false);
+      if (!startsExecution) {
+        setLoading(false);
+        setWorkingAgent(null);
+        setActiveAgents(new Map());
+        setStreamingContent(null);
+        onChatRunStateChange(chat.id, "idle");
+      }
+    }
   };
 
   const handleUserChoiceDismiss = async (approvalId: string) => {
-    if (!chat) return;
-    await api.respondApproval(chat.id, approvalId, false);
-    setApprovals((prev) => prev.filter((approval) => approval.id !== approvalId));
-    setActiveUserChoice(null);
-    setLoading(false);
-    setWorkingAgent(null);
-    setActiveAgents(new Map());
-    setStreamingContent(null);
-    onChatRunStateChange(chat.id, "idle");
-    const msgs = await api.listMessages(chat.id);
-    setMessages(msgs);
+    if (!chat || userChoiceSubmitting) return;
+    setUserChoiceSubmitting(true);
+    setLoading(true);
+    onChatRunStateChange(chat.id, "running");
+    try {
+      await api.respondApproval(chat.id, approvalId, false);
+      const [msgs, pending] = await Promise.all([
+        api.listMessages(chat.id),
+        api.listApprovals(chat.id),
+      ]);
+      setMessages(msgs);
+      setApprovals(pending);
+      syncPendingUserChoice(pending);
+    } catch {
+      setSubmitError(t("chat.agentFailed"));
+    } finally {
+      setUserChoiceSubmitting(false);
+      setLoading(false);
+      setWorkingAgent(null);
+      setActiveAgents(new Map());
+      setStreamingContent(null);
+      onChatRunStateChange(chat.id, "idle");
+    }
   };
 
   const appendUserMessage = (targetChat: Chat, content: string): string => {
@@ -484,6 +747,10 @@ export function ChatPanel({
     setLiveDiscussions([]);
     setStreamingContent(null);
     setTaskBoard(null);
+    setAgentActivities([]);
+    if (!grillActive) {
+      setGrillPhase(null);
+    }
     setActiveAgents(new Map());
     if (activeChat.mode === "quick") {
       setWorkingAgent({
@@ -617,7 +884,14 @@ export function ChatPanel({
               title?: string;
               resolved_role_id?: string;
             };
+            phase?: GrillPhaseState["phase"];
+            idea?: string;
+            question_count?: number;
+            has_plan?: boolean;
+            summary?: string;
           };
+
+          trackAgentActivity(data as Record<string, unknown>);
 
           if (data.type === "context_plugins_started") {
             setContextPluginRuns([]);
@@ -791,6 +1065,16 @@ export function ChatPanel({
             }
           }
 
+          if (data.type === "grill_phase_updated" && data.phase) {
+            setGrillPhase({
+              phase: data.phase,
+              idea: typeof data.idea === "string" ? data.idea : "",
+              questionCount: typeof data.question_count === "number" ? data.question_count : 0,
+              hasPlan: Boolean(data.has_plan),
+              summary: typeof data.summary === "string" ? data.summary : "",
+            });
+          }
+
           if (data.type === "user_message") {
             void api.listMessages(activeChat.id).then(setMessages);
           }
@@ -800,13 +1084,13 @@ export function ChatPanel({
               setPendingShellCommands((prev) =>
                 prev.filter((entry) => entry.approval_id !== data.approval_id),
               );
-              setActiveUserChoice((prev) =>
-                prev?.id === data.approval_id ? null : prev,
-              );
             }
             void Promise.all([
               api.listMessages(activeChat.id).then(setMessages),
-              api.listApprovals(activeChat.id).then(setApprovals),
+              api.listApprovals(activeChat.id).then((pending) => {
+                setApprovals(pending);
+                syncPendingUserChoice(pending);
+              }),
             ]);
           }
 
@@ -858,7 +1142,7 @@ export function ChatPanel({
             } else {
               void api.getChat(activeChat.id).then(onChatUpdated);
             }
-            finishLoading("completed");
+            finishLoading(pendingChoice ? "idle" : "completed");
           }
         };
 
@@ -987,11 +1271,17 @@ export function ChatPanel({
           <div className="chat-header-title">
             <h2>{chat?.title ?? t("chat.newChatTitle")}</h2>
             <span className="badge">
-              {panelMode === "multi"
-                ? t("chat.multiAgent")
-                : isQuickMode
-                  ? t("chat.quickChat")
-                  : t("chat.singleAgent")}
+              {panelMode === "grill"
+                ? t("chat.grillMode")
+                : panelMode === "multi"
+                  ? grillActive
+                    ? `${t("chat.multiAgent")} · ${t("chat.grillBadge")}`
+                    : t("chat.multiAgent")
+                  : isQuickMode
+                    ? t("chat.quickChat")
+                    : grillActive
+                      ? `${t("chat.singleAgent")} · ${t("chat.grillBadge")}`
+                      : t("chat.singleAgent")}
             </span>
             {isQuickMode && (
               <p className="quick-chat-hint">{t("chat.quickChatDescription")}</p>
@@ -1077,16 +1367,43 @@ export function ChatPanel({
           ))}
         </div>
         )}
+        {(panelMode === "single" || panelMode === "multi") && (
+          <label
+            className="grill-option"
+            title={t("chat.grillCheckboxDescription")}
+            data-tooltip={t("chat.grillCheckboxDescription")}
+          >
+            <input
+              type="checkbox"
+              checked={grillEnabled}
+              disabled={grillCheckboxLocked}
+              onChange={(event) => setGrillEnabled(event.target.checked)}
+            />
+            {t("chat.grillCheckbox")}
+          </label>
+        )}
       </header>
 
       <ApprovalPanel approvals={commandApprovals} onRespond={handleApproval} />
       <UserChoiceDialog
         approval={activeUserChoice}
+        processing={userChoiceSubmitting}
         onChoose={handleUserChoice}
         onDismiss={handleUserChoiceDismiss}
       />
 
       <div className="chat-body">
+        {!isQuickMode && (
+          <ChatWorkflowSidebar
+            grillActive={grillActive}
+            grillPhase={grillPhase}
+            taskBoard={taskBoard}
+            agentActivities={agentActivities}
+            testEnabled={activeRoleIds.includes("software_tester")}
+          />
+        )}
+
+        <div className="chat-main">
         <section className="messages" ref={messagesRef}>
           {messages.filter((msg) => !isShellCommandMessage(msg)).map((msg) => {
             const routing = msg.metadata?.routing as { model?: string; task?: string } | undefined;
@@ -1196,9 +1513,6 @@ export function ChatPanel({
             </div>
             );
           })}
-          {shouldShowTaskBoard(taskBoard) && taskBoard && (
-            <TaskBoardPanel snapshot={taskBoard} />
-          )}
           <ContextPluginLog runs={contextPluginRuns} />
           {loading && streamingContent !== null && (
             <div className="message message-assistant message-streaming">
@@ -1242,13 +1556,14 @@ export function ChatPanel({
           <div ref={bottomRef} />
         </section>
 
-        {panelMode === "multi" && (
+        {panelMode === "multi" && !hideAgentHistoryDuringGrill && (
           <AgentHistory
             discussions={discussions}
             liveEvents={liveDiscussions}
             activeAgents={activeAgents}
           />
         )}
+        </div>
       </div>
 
       <footer className="chat-input">

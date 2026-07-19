@@ -140,6 +140,7 @@ async def create_test_chat(
     mode: str = "multi",
     role_ids: list[str] | None = None,
     title: str = "Prompt quality test",
+    grill_enabled: bool = False,
 ) -> Any:
     """
     Create an isolated chat session for orchestration tests.
@@ -147,6 +148,7 @@ async def create_test_chat(
     :param mode: Chat mode label
     :param role_ids: Selected role identifiers
     :param title: Chat title
+    :param grill_enabled: Whether clarify-and-plan grill workflow is enabled
     :return: Created chat response
     """
     return await conversation_store.create_chat(
@@ -155,6 +157,7 @@ async def create_test_chat(
             mode=mode,
             role_ids=role_ids or ["developer", "reviewer"],
             memory=ChatMemorySettings(),
+            grill_enabled=grill_enabled,
         )
     )
 

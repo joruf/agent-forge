@@ -13,6 +13,7 @@ class OrchestrationMode(str, Enum):
     SINGLE = "single"
     MULTI = "multi"
     QUICK = "quick"
+    GRILL = "grill"
 
 
 class ExecutionStrategy(str, Enum):
@@ -87,6 +88,7 @@ class ChatCreate(BaseModel):
     execution_strategy: ExecutionStrategy = ExecutionStrategy.AUTO
     role_ids: list[str] = Field(default_factory=list)
     memory: ChatMemorySettings = Field(default_factory=ChatMemorySettings)
+    grill_enabled: bool = False
 
 
 class ChatUpdate(BaseModel):
@@ -97,6 +99,7 @@ class ChatUpdate(BaseModel):
     execution_strategy: ExecutionStrategy | None = None
     role_ids: list[str] | None = None
     memory: ChatMemorySettings | None = None
+    grill_enabled: bool | None = None
 
 
 class ChatResponse(BaseModel):
@@ -108,6 +111,7 @@ class ChatResponse(BaseModel):
     execution_strategy: ExecutionStrategy
     role_ids: list[str]
     memory: ChatMemorySettings
+    grill_enabled: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -223,6 +227,16 @@ class OrchestrationResumeState(BaseModel):
     source_role_id: str = ""
     source_role_name: str = ""
     question_text: str = ""
+
+
+class GrillResumeState(BaseModel):
+    """Continuation state for grill-mode clarification and plan review."""
+
+    chat_id: str
+    phase: str
+    session_snapshot: dict[str, Any] = Field(default_factory=dict)
+    pending_question: str = ""
+    recommended_answer: str = ""
 
 
 class CommandRequest(BaseModel):

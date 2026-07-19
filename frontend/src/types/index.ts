@@ -1,4 +1,4 @@
-export type OrchestrationMode = "single" | "multi" | "quick";
+export type OrchestrationMode = "single" | "multi" | "quick" | "grill";
 export type ExecutionStrategy = "auto" | "serial" | "parallel" | "hybrid";
 export type ChatRunStatus = "running" | "completed";
 
@@ -13,12 +13,14 @@ export interface NewChatDraft {
   execution_strategy: ExecutionStrategy;
   role_ids: string[];
   memory: ChatMemorySettings;
+  grill_enabled: boolean;
 }
 
 export interface CommitNewChatPayload {
   execution_strategy: ExecutionStrategy;
   role_ids: string[];
   memory: ChatMemorySettings;
+  grill_enabled: boolean;
 }
 
 export interface AgentRole {
@@ -36,6 +38,7 @@ export interface Chat {
   execution_strategy: ExecutionStrategy;
   role_ids: string[];
   memory: ChatMemorySettings;
+  grill_enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -279,6 +282,17 @@ export interface ShellCommandEntry {
   approval_id?: string;
   output?: string;
   timestamp: string;
+}
+
+export type AgentActivityStatus = "running" | "done" | "failed";
+
+export interface AgentActivityItem {
+  id: string;
+  agentId: string;
+  agentName: string;
+  description: string;
+  status: AgentActivityStatus;
+  tool?: string;
 }
 
 export interface SetupStatus {

@@ -7,6 +7,23 @@ from agentforge.tools.registry import ReadFileTool, WriteFileTool, _resolve_path
 from agentforge.tools.shell_security import classify_shell_command
 
 
+@pytest.mark.asyncio
+async def test_normalize_workspace_relative_path_maps_home_github_path(
+    temp_workspace,
+    monkeypatch,
+) -> None:
+    """write_file accepts home-relative GitHub paths when workspace root is Dokumente."""
+    from pathlib import Path
+
+    from agentforge.config import settings
+    from agentforge.tools.registry import normalize_workspace_relative_path
+
+    monkeypatch.setattr(settings, "workspace_root", temp_workspace)
+    absolute = str(Path.home() / "GitHub" / "emailsender" / "SimpleEmailSender.php")
+    mapped = normalize_workspace_relative_path(absolute)
+    assert mapped == "GitHub/emailsender/SimpleEmailSender.php"
+
+
 def test_resolve_path_blocks_escape(temp_workspace) -> None:
     """Paths outside workspace root are rejected."""
     with pytest.raises(PermissionError):

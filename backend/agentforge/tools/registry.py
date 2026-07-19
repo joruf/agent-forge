@@ -46,18 +46,20 @@ def normalize_workspace_relative_path(path_str: str) -> str:
     if not raw:
         raise PermissionError("Empty path")
 
+    from agentforge.agents.workspace_intent import resolve_under_workspace_root
+
     root = settings.workspace_root.resolve()
     candidate = Path(raw)
     if candidate.is_absolute():
-        resolved = candidate.resolve()
-        if not str(resolved).startswith(str(root)):
+        resolved = resolve_under_workspace_root(raw)
+        if resolved is None:
             raise PermissionError("Path escapes workspace root")
         return str(resolved.relative_to(root))
 
-    target = (root / raw.lstrip("/")).resolve()
-    if not str(target).startswith(str(root)):
+    resolved = resolve_under_workspace_root(raw)
+    if resolved is None:
         raise PermissionError("Path escapes workspace root")
-    return str(target.relative_to(root))
+    return str(resolved.relative_to(root))
 
 
 def _resolve_path(relative_path: str) -> Path:
@@ -221,8 +223,11 @@ class WriteFileTool(BaseTool):
 
         relative_path = str(arguments["path"])
         try:
-            created_dirs = _parents_to_create(relative_path)
             path = _resolve_path(relative_path)
+            resolved_relative = normalize_workspace_relative_path(
+                str(path.relative_to(settings.workspace_root.resolve())),
+            )
+            created_dirs = _parents_to_create(relative_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             if is_document_path(path):
                 try:
@@ -230,7 +235,7 @@ class WriteFileTool(BaseTool):
                 except OptionalDependencyError as exc:
                     output = str(exc)
                     await record_write_file(
-                        relative_path,
+                        resolved_relative,
                         output=output,
                         success=False,
                         created_dirs=created_dirs,
@@ -238,10 +243,10 @@ class WriteFileTool(BaseTool):
                     return ToolCallResult(tool=self.name, success=False, output=output)
             else:
                 path.write_text(arguments["content"], encoding="utf-8")
-            output = f"Written: {path}"
+            output = f"Written: {resolved_relative}"
             result = ToolCallResult(tool=self.name, success=True, output=output)
             await record_write_file(
-                relative_path,
+                resolved_relative,
                 output=output,
                 success=True,
                 created_dirs=created_dirs,

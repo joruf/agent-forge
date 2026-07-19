@@ -60,6 +60,10 @@
     "multiAgent": "Multi-Agent",
     "singleAgent": "Single Agent",
     "quickChat": "Quick Chat",
+    "grillMode": "Grill-Modus",
+    "grillBadge": "Grill",
+    "grillCheckbox": "Grill-Modus — Erst klären & planen",
+    "grillCheckboxDescription": "Grill-Modus: Stellt Rückfragen und lässt einen Plan prüfen, bevor gebaut wird.",
     "quickAssistant": "Assistent",
     "quickChatDescription": "Schneller Chat ohne Tools — ideal für einfache Fragen.",
     "agentWorkingQuick": "Antwort wird gestreamt…",
@@ -252,12 +256,34 @@
     "customInputPlaceholder": "Klarstellung oder Anweisung eingeben…",
     "customSubmit": "Antwort senden",
     "customCancel": "Zurück zu den Optionen",
+    "processing": "Auswahl wird übermittelt…",
+    "processingQuestion": "Antwort erhalten — nächste Frage wird vorbereitet…",
+    "processingPlan": "Plan freigegeben — Umsetzung wird vorbereitet…",
+    "optionAcceptRecommended": "Empfohlene Antwort übernehmen",
+    "optionCustomReply": "Eigene Antwort eingeben",
+    "optionAbort": "Abbrechen",
+    "optionApprovePlan": "Plan freigeben und umsetzen",
+    "whyThisMatters": "Warum das wichtig ist",
     "titles": {
       "missingContentTag": "Fehlende Inhaltsquelle",
       "agentBlocked": "Agent benötigt Hilfe",
       "agentQuestion": "Agentenfrage",
       "workflowIncomplete": "Workflow unvollständig",
+      "grillQuestion": "Grill-Frage",
+      "grillPlanReview": "Plan prüfen",
       "generic": "Klärung erforderlich"
+    }
+  },
+  "grill": {
+    "title": "Grill-Workflow",
+    "questionCount": "{{count}} beantwortet",
+    "phases": {
+      "idea": "Idee",
+      "clarify": "Klärung",
+      "plan": "Planung",
+      "execute": "Umsetzung",
+      "test": "Test",
+      "done": "Fertig"
     }
   },
   "agentHistory": {
@@ -267,6 +293,39 @@
     "running": "Aktiv",
     "working": "Agent arbeitet…",
     "waiting": "Warte auf Agent-Antworten…"
+  },
+  "workflowSidebar": {
+    "title": "Workflow-Übersicht",
+    "grillInactive": "Grill-Modus ist aus.",
+    "grillWaiting": "Warte auf den Start des Grill-Workflows.",
+    "taskPlanEmpty": "Noch kein Task-Plan.",
+    "activityEmpty": "Noch keine Agent-Aktivität."
+  },
+  "agentActivity": {
+    "title": "Aktuelle Aktivität",
+    "started": "Arbeit gestartet",
+    "finished": "Fertig",
+    "contextPlugin": "Kontext-Plugin wird geladen",
+    "status": {
+      "running": "Läuft",
+      "done": "Fertig",
+      "failed": "Fehlgeschlagen"
+    },
+    "tool": {
+      "writeFile": "Schreibt Datei {{path}}",
+      "writeFileGeneric": "Schreibt Datei",
+      "readFile": "Liest Datei {{path}}",
+      "readFileGeneric": "Liest Datei",
+      "editFile": "Bearbeitet Datei {{path}}",
+      "editFileGeneric": "Bearbeitet Datei",
+      "listDirectory": "Listet Verzeichnis {{path}}",
+      "listDirectoryGeneric": "Listet Verzeichnis",
+      "runCommand": "Führt Befehl aus: {{command}}",
+      "runCommandGeneric": "Führt Shell-Befehl aus",
+      "searchFiles": "Sucht Dateien nach \"{{query}}\"",
+      "searchFilesGeneric": "Sucht Dateien",
+      "generic": "Nutzt Tool {{tool}}"
+    }
   },
   "expandable": {
     "showMore": "Mehr anzeigen",

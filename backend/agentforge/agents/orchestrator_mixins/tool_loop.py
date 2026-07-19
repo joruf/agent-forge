@@ -75,6 +75,7 @@ from agentforge.models.schemas import (
     MessageResponse,
     OrchestrationResponse,
     OrchestrationResumeState,
+    GrillResumeState,
     ToolCallResult,
 )
 from agentforge.storage.conversation_store import conversation_store
@@ -663,6 +664,14 @@ class ToolLoopMixin:
                     resume_state,
                     response,
                     on_event=on_event,
+                )
+            if isinstance(resume_state, GrillResumeState):
+                chat = await conversation_store.get_chat(chat_id)
+                return await self._resume_grill_after_choice(
+                    resume_state,
+                    response,
+                    chat.role_ids,
+                    on_event,
                 )
             if isinstance(resume_state, OrchestrationResumeState):
                 return await self._resume_orchestration_after_clarification(

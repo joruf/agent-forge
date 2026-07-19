@@ -8,6 +8,7 @@ export const DEFAULT_MULTI_ROLES = [
   "project_manager",
   "developer",
   "reviewer",
+  "software_tester",
 ];
 
 export const SDLC_ROLE_ORDER = [

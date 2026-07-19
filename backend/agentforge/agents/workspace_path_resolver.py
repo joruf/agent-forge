@@ -194,6 +194,35 @@ def _is_ordered_path_subsequence(
     return index == len(path_parts)
 
 
+def remap_spurious_intermediate_segment(
+    relative: str,
+    canonical_paths: list[str],
+) -> str | None:
+    """
+    Remove an extra intermediate directory segment when a canonical target exists.
+
+    Example: ``GitHub/emailsender/for/index.php`` -> ``GitHub/emailsender/index.php``
+    when the latter is a known canonical deliverable path.
+
+    :param relative: Workspace-relative path
+    :param canonical_paths: Known canonical paths for this request
+    :return: Remapped path or None
+    """
+    path = Path(relative)
+    if not canonical_paths or not path.name:
+        return None
+
+    for canonical in canonical_paths:
+        candidate = Path(canonical)
+        if path.name != candidate.name:
+            continue
+        if len(path.parts) <= len(candidate.parts):
+            continue
+        if _is_ordered_path_subsequence(candidate.parts, path.parts):
+            return canonical
+    return None
+
+
 def remap_to_known_canonical(
     relative: str,
     canonical_paths: list[str],
@@ -253,9 +282,18 @@ def resolve_workspace_path(path_str: str) -> str:
     if remapped:
         candidates.append(remapped)
 
+    spurious = remap_spurious_intermediate_segment(
+        normalized,
+        context.canonical_paths,
+    )
+    if spurious:
+        candidates.append(spurious)
+
     for candidate in candidates:
         if candidate == normalized:
             continue
+        if candidate in context.canonical_paths:
+            return candidate
         if _file_exists_in_workspace(candidate):
             return candidate
         if named_folder and is_obvious_missing_named_folder(
@@ -264,7 +302,7 @@ def resolve_workspace_path(path_str: str) -> str:
             context.intent.target_dirs,
         ):
             return candidate
-        if remapped == candidate:
+        if remapped == candidate or spurious == candidate:
             return candidate
 
     return normalized

@@ -160,6 +160,7 @@ export const api = {
     execution_strategy?: ExecutionStrategy;
     role_ids?: string[];
     memory?: ChatMemorySettings;
+    grill_enabled?: boolean;
   }) =>
     request<Chat>("/chats", {
       method: "POST",
@@ -169,6 +170,7 @@ export const api = {
         execution_strategy: data.execution_strategy ?? "auto",
         role_ids: data.role_ids ?? [],
         memory: data.memory,
+        grill_enabled: data.grill_enabled ?? false,
       }),
     }),
 
@@ -182,6 +184,7 @@ export const api = {
       execution_strategy: ExecutionStrategy;
       role_ids: string[];
       memory: ChatMemorySettings;
+      grill_enabled: boolean;
     }>,
   ) =>
     request<Chat>(`/chats/${id}`, {

@@ -15,6 +15,7 @@ from agentforge.agents.workspace_path_resolver import (
     deactivate_path_resolution_context,
     is_obvious_missing_named_folder,
     remap_missing_named_folder,
+    remap_spurious_intermediate_segment,
     remap_to_known_canonical,
     resolve_workspace_path,
 )
@@ -307,3 +308,39 @@ def test_intent_maps_user_read_path_to_canonical_target(test12_prompt: str) -> N
 
     assert intent.target_paths == ["GitHub/Test12/index.html"]
     assert intent.target_dirs == ["GitHub/Test12"]
+
+
+def test_remap_spurious_intermediate_segment_removes_extra_folder() -> None:
+    """Extra intermediate folders are removed when a canonical target exists."""
+    canonical = ["GitHub/emailsender/index.php"]
+    assert (
+        remap_spurious_intermediate_segment("GitHub/emailsender/for/index.php", canonical)
+        == "GitHub/emailsender/index.php"
+    )
+
+
+@pytest.mark.asyncio
+async def test_write_file_tool_removes_spurious_intermediate_segment(
+    workspace_root: Path,
+) -> None:
+    """write_file remaps GitHub/emailsender/for/index.php to the canonical target."""
+    prompt = (
+        f"erstelle mir ein Programm unter {workspace_root / 'GitHub' / 'emailsender'}/ "
+        "das programm soll in php eine email senden"
+    )
+    intent = detect_workspace_intent(prompt)
+    context = build_path_resolution_context(prompt, intent)
+    token = activate_path_resolution_context(context)
+    try:
+        result = await WriteFileTool().execute(
+            {
+                "path": "GitHub/emailsender/for/index.php",
+                "content": "<?php mail('a@b.c', 's', 'b');",
+            },
+        )
+        canonical = workspace_root / "GitHub" / "emailsender" / "index.php"
+        assert result.success is True
+        assert canonical.is_file()
+        assert not (workspace_root / "GitHub" / "emailsender" / "for").exists()
+    finally:
+        deactivate_path_resolution_context(token)

@@ -223,6 +223,31 @@ Single/Quick always force **`serial`**.
 
 Defined in `models/schemas.py` as `OrchestrationMode`:
 
+| Mode | Value | Description |
+|------|-------|-------------|
+| Single | `single` | One agent with tools |
+| Multi | `multi` | Multi-agent discussion + synthesis |
+| Quick | `quick` | Fast chat without workspace tools |
+| Grill (legacy) | `grill` | Deprecated standalone mode; use `grill_enabled` on single/multi instead |
+
+### Grill workflow
+
+Enable via **Clarify & plan first** checkbox on single- or multi-agent chats (`grill_enabled` on the chat record), or use legacy `grill` mode.
+
+**Files:** `agents/grill_mode.py`, `agents/orchestrator_mixins/grill.py`
+
+Workflow phases (`GrillPhase`): `idea` → `clarify` → `plan` → `execute` → `test` → `done`.
+
+1. User describes an idea.
+2. PM role asks **one question at a time** with a recommended answer (UserChoiceDialog).
+3. When clarifications are complete, architect role generates a **markdown plan**.
+4. User approves the plan (or requests changes).
+5. Approved plan runs through the chat's base orchestration path (**single-agent** or **multi-agent** build pipeline).
+6. **Test** phase runs verification with the **Software Tester** role (syntax checks, smoke tests, acceptance criteria).
+7. Session completes at **Done**.
+
+Session state persists under memory key `_agentforge_grill_session`. WebSocket event: `grill_phase_updated`.
+
 | Mode | Enum value | Description |
 |------|------------|-------------|
 | **Quick** | `quick` | Fast reply without role tools; minimal context |

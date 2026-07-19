@@ -704,7 +704,7 @@ cd frontend && npm run tauri:build
 
 ## Roadmap (Phase 2+)
 
-Shipped in current releases: web search tool, custom role editor in Settings → Agents, PDF/Word document read/write with auto-install of dependencies, unified user-choice clarification dialogs for workflow blockers.
+Shipped in current releases: web search tool, custom role editor in Settings → Agents, PDF/Word document read/write with auto-install of dependencies, unified user-choice clarification dialogs for workflow blockers, **Grill Mode** (Idea → Clarify → Plan → Execute).
 
 - REST API integrations beyond web search
 - Plugin system for external tools

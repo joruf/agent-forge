@@ -16,6 +16,7 @@ from agentforge.agents.workspace_agenda import (
     build_workspace_agenda,
     format_agenda_block,
 )
+from agentforge.agents.workspace_executor import plan_deliverable_files
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.memory.store import memory_store
 
@@ -571,6 +572,15 @@ def record_tool_result_as_fact(
     else:
         path = None
 
+    if path and tool_name in {"write_file", "read_file", "list_directory"}:
+        try:
+            from agentforge.agents.workspace_path_resolver import resolve_workspace_path
+            from agentforge.tools.registry import normalize_workspace_relative_path
+
+            path = resolve_workspace_path(normalize_workspace_relative_path(path))
+        except (OSError, PermissionError, ValueError):
+            pass
+
     kind = "tool_output"
     content = output
     verified = success
@@ -663,6 +673,28 @@ def check_completion(task_state: TaskState) -> CompletionReport:
             for fact in task_state.verified_facts("file_written")
             if fact.path
         }
+        missing_paths, wrong_location = analyze_write_path_compliance(task_state)
+        if wrong_location:
+            pairs = ", ".join(
+                f"{actual} (expected {expected})"
+                for expected, actual in wrong_location
+            )
+            return CompletionReport(
+                complete=False,
+                reason=f"Files written to wrong location: {pairs}",
+                missing=[expected for expected, _ in wrong_location] + missing_paths,
+            )
+        if missing_paths:
+            return CompletionReport(
+                complete=False,
+                reason="Missing verified writes at required paths",
+                missing=missing_paths,
+            )
+
+        required_paths = collect_required_write_paths(task_state)
+        if required_paths:
+            return CompletionReport(complete=True)
+
         if task_state.targets and not written:
             return CompletionReport(
                 complete=False,
@@ -689,6 +721,13 @@ def check_completion(task_state: TaskState) -> CompletionReport:
                     reason="Missing verified write_file steps",
                     missing=missing_writes,
                 )
+        if written and not task_state.targets and not write_paths:
+            return CompletionReport(complete=True)
+        if not written:
+            return CompletionReport(
+                complete=False,
+                reason="No verified writes recorded",
+            )
         return CompletionReport(complete=True)
 
     if task_state.task_type == TaskType.WRITE_THEN_READ:
@@ -697,15 +736,37 @@ def check_completion(task_state: TaskState) -> CompletionReport:
             for fact in task_state.verified_facts("file_written")
             if fact.path
         }
+        missing_paths, wrong_location = analyze_write_path_compliance(task_state)
+        if wrong_location:
+            pairs = ", ".join(
+                f"{actual} (expected {expected})"
+                for expected, actual in wrong_location
+            )
+            return CompletionReport(
+                complete=False,
+                reason=f"Files written to wrong location: {pairs}",
+                missing=[expected for expected, _ in wrong_location] + missing_paths,
+            )
+        if missing_paths:
+            return CompletionReport(
+                complete=False,
+                reason="Missing verified writes at required paths",
+                missing=missing_paths,
+            )
+
         file_targets = [
             target
             for target in task_state.targets
             if target and "." in target.rsplit("/", 1)[-1]
         ]
         if not file_targets:
-            file_targets = sorted(written)
+            required_paths = collect_required_write_paths(task_state)
+            file_targets = required_paths or sorted(written)
+        normalized_written = {_normalize_relative_path(path) for path in written}
         missing_writes = [
-            target for target in file_targets if target not in written
+            target
+            for target in file_targets
+            if _normalize_relative_path(target) not in normalized_written
         ]
         if missing_writes:
             return CompletionReport(
@@ -1342,6 +1403,92 @@ def _normalize_relative_path(path: str | None) -> str:
     return (path or "").strip().lstrip("/")
 
 
+def _is_workspace_file_path(path: str) -> bool:
+    """
+    Return True when a workspace-relative path refers to a file.
+
+    :param path: Workspace-relative path
+    :return: True for file paths with an extension
+    """
+    name = Path(path).name
+    return bool(name) and "." in name and not name.startswith(".")
+
+
+def collect_required_write_paths(task_state: TaskState) -> list[str]:
+    """
+    Collect canonical workspace-relative file paths that must be written.
+
+    :param task_state: Active task board
+    :return: Deduplicated required write paths
+    """
+    processing_content = task_state.interpreted_request or task_state.user_request
+    intent = detect_workspace_intent(processing_content)
+    required: list[str] = []
+    seen: set[str] = set()
+
+    agenda = build_workspace_agenda(processing_content, intent)
+    for step in agenda:
+        if step.action != AgendaAction.WRITE_FILE or not step.path:
+            continue
+        normalized = _normalize_relative_path(step.path)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            required.append(normalized)
+
+    for target in task_state.targets:
+        normalized = _normalize_relative_path(target)
+        if normalized and _is_workspace_file_path(normalized) and normalized not in seen:
+            seen.add(normalized)
+            required.append(normalized)
+
+    if not required and intent.wants_file_creation:
+        for path in plan_deliverable_files(processing_content, intent):
+            normalized = _normalize_relative_path(path)
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                required.append(normalized)
+
+    return required
+
+
+def analyze_write_path_compliance(
+    task_state: TaskState,
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """
+    Compare verified writes against required target paths.
+
+    :param task_state: Active task board
+    :return: Tuple of missing required paths and (expected, actual) wrong-location pairs
+    """
+    required = collect_required_write_paths(task_state)
+    if not required:
+        return [], []
+
+    written = {
+        _normalize_relative_path(fact.path)
+        for fact in task_state.verified_facts("file_written")
+        if fact.path
+    }
+    missing: list[str] = []
+    wrong_location: list[tuple[str, str]] = []
+
+    for required_path in required:
+        if required_path in written:
+            continue
+        basename = Path(required_path).name
+        misplaced = sorted(
+            candidate
+            for candidate in written
+            if Path(candidate).name == basename and candidate != required_path
+        )
+        if misplaced:
+            wrong_location.append((required_path, misplaced[0]))
+        else:
+            missing.append(required_path)
+
+    return missing, wrong_location
+
+
 def _path_matches_fact(step_path: str | None, fact_path: str | None) -> bool:
     """
     Return True when a verified fact path belongs to an agenda step path.
@@ -1419,6 +1566,12 @@ def _step_is_complete(
         return False
     if action == "write_file":
         if not path:
+            required_paths = collect_required_write_paths(task_state)
+            if required_paths:
+                return all(
+                    _step_is_complete("write_file", required_path, task_state)
+                    for required_path in required_paths
+                )
             return bool(task_state.verified_facts("file_written"))
         normalized = _normalize_relative_path(path)
         for kind in ("file_written", "file_edited"):

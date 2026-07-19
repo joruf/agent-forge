@@ -154,6 +154,7 @@ export default function App() {
           : mode === "quick"
             ? []
             : [DEFAULT_SINGLE_ROLE],
+      grill_enabled: false,
       memory: {
         enabled: true,
         memory_tokens: settings?.default_memory_tokens ?? 32000,
@@ -203,6 +204,7 @@ export default function App() {
       execution_strategy: payload.execution_strategy,
       role_ids: payload.role_ids,
       memory: payload.memory,
+      grill_enabled: payload.grill_enabled,
       title: "New Chat",
     });
     setChats((prev) => [chat, ...prev]);

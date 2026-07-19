@@ -3,18 +3,19 @@ import { useI18n } from "../hooks/useI18n";
 
 interface TaskBoardPanelProps {
   snapshot: TaskBoardSnapshot;
+  embedded?: boolean;
 }
 
 function actionLabelKey(action: string): string {
   return `taskBoard.action.${action}`;
 }
 
-export function TaskBoardPanel({ snapshot }: TaskBoardPanelProps) {
+export function TaskBoardPanel({ snapshot, embedded = false }: TaskBoardPanelProps) {
   const { t } = useI18n();
 
   return (
     <section
-      className="task-board-panel"
+      className={`task-board-panel${embedded ? " task-board-panel--embedded" : ""}`}
       aria-label={t("taskBoard.title")}
       data-complete={snapshot.complete ? "true" : "false"}
     >
@@ -25,6 +26,9 @@ export function TaskBoardPanel({ snapshot }: TaskBoardPanelProps) {
           <span className="task-board-complete-badge">{t("taskBoard.complete")}</span>
         )}
       </div>
+      {!snapshot.complete && snapshot.reason && (
+        <p className="task-board-reason" role="status">{snapshot.reason}</p>
+      )}
       <ol className="task-board-steps">
         {snapshot.steps.map((step) => (
           <li

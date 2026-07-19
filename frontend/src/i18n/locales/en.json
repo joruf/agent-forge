@@ -60,6 +60,10 @@
     "multiAgent": "Multi-Agent",
     "singleAgent": "Single Agent",
     "quickChat": "Quick Chat",
+    "grillMode": "Grill Mode",
+    "grillBadge": "Grill",
+    "grillCheckbox": "Grill Mode — Clarify & plan first",
+    "grillCheckboxDescription": "Grill Mode: ask clarifying questions and review a plan before building.",
     "quickAssistant": "Assistant",
     "quickChatDescription": "Fast chat without tools — ideal for simple questions.",
     "agentWorkingQuick": "Reply is streaming…",
@@ -252,12 +256,34 @@
     "customInputPlaceholder": "Type your clarification or instruction…",
     "customSubmit": "Submit answer",
     "customCancel": "Back to options",
+    "processing": "Submitting your choice…",
+    "processingQuestion": "Answer received — preparing the next question…",
+    "processingPlan": "Plan approved — preparing the build…",
+    "optionAcceptRecommended": "Accept recommended answer",
+    "optionCustomReply": "Provide a different answer",
+    "optionAbort": "Abort",
+    "optionApprovePlan": "Approve plan and build",
+    "whyThisMatters": "Why this matters",
     "titles": {
       "missingContentTag": "Missing content source",
       "agentBlocked": "Agent needs help",
       "agentQuestion": "Agent question",
       "workflowIncomplete": "Workflow incomplete",
+      "grillQuestion": "Grill question",
+      "grillPlanReview": "Review plan",
       "generic": "Clarification needed"
+    }
+  },
+  "grill": {
+    "title": "Grill workflow",
+    "questionCount": "{{count}} answered",
+    "phases": {
+      "idea": "Idea",
+      "clarify": "Clarify",
+      "plan": "Plan",
+      "execute": "Build",
+      "test": "Test",
+      "done": "Done"
     }
   },
   "agentHistory": {
@@ -267,6 +293,39 @@
     "running": "Running",
     "working": "Agent is working…",
     "waiting": "Waiting for agent responses…"
+  },
+  "workflowSidebar": {
+    "title": "Workflow overview",
+    "grillInactive": "Grill mode is off.",
+    "grillWaiting": "Waiting for the grill workflow to start.",
+    "taskPlanEmpty": "No task plan yet.",
+    "activityEmpty": "No agent activity yet."
+  },
+  "agentActivity": {
+    "title": "Current activity",
+    "started": "Started working",
+    "finished": "Finished",
+    "contextPlugin": "Loading context plugin",
+    "status": {
+      "running": "Running",
+      "done": "Done",
+      "failed": "Failed"
+    },
+    "tool": {
+      "writeFile": "Writing file {{path}}",
+      "writeFileGeneric": "Writing file",
+      "readFile": "Reading file {{path}}",
+      "readFileGeneric": "Reading file",
+      "editFile": "Editing file {{path}}",
+      "editFileGeneric": "Editing file",
+      "listDirectory": "Listing directory {{path}}",
+      "listDirectoryGeneric": "Listing directory",
+      "runCommand": "Running command: {{command}}",
+      "runCommandGeneric": "Running shell command",
+      "searchFiles": "Searching files for \"{{query}}\"",
+      "searchFilesGeneric": "Searching files",
+      "generic": "Using tool {{tool}}"
+    }
   },
   "expandable": {
     "showMore": "Show more",

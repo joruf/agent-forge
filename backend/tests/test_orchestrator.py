@@ -68,6 +68,13 @@ def test_resolve_execution_strategy_for_pr2_hybrid_mode() -> None:
     )
     assert (
         AgentOrchestrator._resolve_execution_strategy(
+            OrchestrationMode.GRILL,
+            ExecutionStrategy.AUTO,
+        )
+        == ExecutionStrategy.SERIAL
+    )
+    assert (
+        AgentOrchestrator._resolve_execution_strategy(
             OrchestrationMode.MULTI,
             ExecutionStrategy.AUTO,
         )

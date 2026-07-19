@@ -40,6 +40,10 @@ class ConversationStore:
             await db.execute(
                 "ALTER TABLE chats ADD COLUMN execution_strategy TEXT NOT NULL DEFAULT 'auto'"
             )
+        if "grill_enabled" not in existing_columns:
+            await db.execute(
+                "ALTER TABLE chats ADD COLUMN grill_enabled INTEGER NOT NULL DEFAULT 0"
+            )
 
     async def initialize(self) -> None:
         """Create database tables if they do not exist."""
@@ -90,9 +94,10 @@ class ConversationStore:
             await db.execute(
                 """
                 INSERT INTO chats (
-                    id, title, mode, execution_strategy, role_ids, memory, created_at, updated_at
+                    id, title, mode, execution_strategy, role_ids, memory, grill_enabled,
+                    created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     chat_id,
@@ -101,6 +106,7 @@ class ConversationStore:
                     data.execution_strategy.value,
                     json.dumps(data.role_ids),
                     data.memory.model_dump_json(),
+                    1 if data.grill_enabled else 0,
                     now,
                     now,
                 ),
@@ -142,12 +148,16 @@ class ConversationStore:
         )
         role_ids = data.role_ids if data.role_ids is not None else chat.role_ids
         memory = data.memory if data.memory is not None else chat.memory
+        grill_enabled = (
+            data.grill_enabled if data.grill_enabled is not None else chat.grill_enabled
+        )
         now = _utcnow().isoformat()
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 """
                 UPDATE chats
-                SET title = ?, mode = ?, execution_strategy = ?, role_ids = ?, memory = ?, updated_at = ?
+                SET title = ?, mode = ?, execution_strategy = ?, role_ids = ?, memory = ?,
+                    grill_enabled = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -156,6 +166,7 @@ class ConversationStore:
                     execution_strategy,
                     json.dumps(role_ids),
                     memory.model_dump_json(),
+                    1 if grill_enabled else 0,
                     now,
                     chat_id,
                 ),
@@ -231,6 +242,11 @@ class ConversationStore:
 
     def _row_to_chat(self, row) -> ChatResponse:
         """Convert database row to ChatResponse."""
+        grill_enabled = False
+        if "grill_enabled" in row.keys():
+            grill_enabled = bool(row["grill_enabled"])
+        elif row["mode"] == OrchestrationMode.GRILL.value:
+            grill_enabled = True
         return ChatResponse(
             id=row["id"],
             title=row["title"],
@@ -238,6 +254,7 @@ class ConversationStore:
             execution_strategy=ExecutionStrategy(row["execution_strategy"]),
             role_ids=json.loads(row["role_ids"]),
             memory=ChatMemorySettings.model_validate_json(row["memory"]),
+            grill_enabled=grill_enabled,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

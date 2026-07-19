@@ -6,12 +6,14 @@ import pytest
 
 from agentforge.agents.task_state import (
     TaskType,
+    analyze_write_path_compliance,
     build_escalation_message,
     build_final_response_from_task_state,
     build_pm_verification_block,
     build_task_board_ui_payload,
     build_task_state,
     check_completion,
+    collect_required_write_paths,
     discussion_entry_is_repeat,
     discussion_similarity,
     format_inter_round_memory_block,
@@ -262,6 +264,60 @@ EIGHT_STEP_H3_1TXT_FITXT_PROMPT = (
     f"{SEVEN_STEP_H3_AND_1TXT_PROMPT}\n"
     "erstelle danach die txt datei fi.txt und schreibe den text vom H2 Tag des HTML Datei rein"
 )
+
+
+def test_write_files_fails_when_written_to_wrong_directory() -> None:
+    """Task completion fails when a file exists only under the wrong workspace path."""
+    prompt = (
+        "erstelle mir ein Programm unter /home/joruf/GitHub/emailsender\n"
+        "named SimpleEmailSender.php"
+    )
+    intent = detect_workspace_intent(prompt)
+    state = build_task_state(prompt, intent)
+
+    required = collect_required_write_paths(state)
+    assert "GitHub/emailsender/SimpleEmailSender.php" in required
+
+    seed_write_facts(state, ["SimpleEmailSender.php"])
+
+    missing, wrong_location = analyze_write_path_compliance(state)
+    assert wrong_location
+    assert wrong_location[0][0] == "GitHub/emailsender/SimpleEmailSender.php"
+    assert wrong_location[0][1] == "SimpleEmailSender.php"
+
+    report = check_completion(state)
+    assert report.complete is False
+    assert "wrong location" in report.reason.lower()
+
+    payload = build_task_board_ui_payload(state)
+    assert payload["complete"] is False
+    assert any(
+        step["status"] != "done"
+        for step in payload["steps"]
+        if step["action"] == "write_file"
+    )
+
+
+def test_write_files_succeeds_at_required_path() -> None:
+    """Task completion passes when files are written to the required workspace path."""
+    prompt = (
+        "erstelle mir ein Programm unter /home/joruf/GitHub/emailsender\n"
+        "named SimpleEmailSender.php"
+    )
+    intent = detect_workspace_intent(prompt)
+    state = build_task_state(prompt, intent)
+    seed_write_facts(state, ["GitHub/emailsender/SimpleEmailSender.php"])
+
+    report = check_completion(state)
+    assert report.complete is True
+
+    payload = build_task_board_ui_payload(state)
+    assert payload["complete"] is True
+    assert any(
+        step["status"] == "done"
+        for step in payload["steps"]
+        if step["action"] == "write_file"
+    )
 
 
 def test_seed_step_error_fact_surfaces_in_workflow_final_response() -> None:

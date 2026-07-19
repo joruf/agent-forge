@@ -112,6 +112,7 @@ from agentforge.services.command_audit import (
 
 from agentforge.agents.orchestrator_mixins.clarification import ClarificationMixin
 from agentforge.agents.orchestrator_mixins.deliverables import DeliverablesMixin
+from agentforge.agents.orchestrator_mixins.grill import GrillMixin
 from agentforge.agents.orchestrator_mixins.multi_agent import MultiAgentMixin
 from agentforge.agents.orchestrator_mixins.parsing import ParsingMixin
 from agentforge.agents.orchestrator_mixins.single_agent import SingleAgentMixin
@@ -135,6 +136,7 @@ class AgentOrchestrator(
     ParsingMixin,
     DeliverablesMixin,
     ClarificationMixin,
+    GrillMixin,
     ToolLoopMixin,
     MultiAgentMixin,
     SingleAgentMixin,
@@ -279,7 +281,7 @@ class AgentOrchestrator(
         :param requested: Requested strategy from chat settings
         :return: Effective strategy used by the orchestrator
         """
-        if mode in (OrchestrationMode.SINGLE, OrchestrationMode.QUICK):
+        if mode in (OrchestrationMode.SINGLE, OrchestrationMode.QUICK, OrchestrationMode.GRILL):
             return ExecutionStrategy.SERIAL
         if requested == ExecutionStrategy.AUTO:
             return ExecutionStrategy.HYBRID
@@ -718,6 +720,24 @@ class AgentOrchestrator(
                 agent_discussions=[],
                 pending_approvals=approval_manager.list_pending(chat_id),
                 effective_execution_strategy=effective_strategy,
+            )
+
+        from agentforge.agents.grill_mode import load_grill_session
+
+        grill_session = await load_grill_session(chat_id)
+        use_grill = (
+            mode == OrchestrationMode.GRILL
+            or chat.grill_enabled
+            or grill_session is not None
+        )
+        if use_grill and mode != OrchestrationMode.QUICK:
+            return await self._run_grill(
+                chat_id,
+                interpretation_content,
+                role_ids,
+                effective_strategy,
+                on_event,
+                intervention_queue,
             )
 
         workspace_intent = detect_workspace_intent(interpretation_content)

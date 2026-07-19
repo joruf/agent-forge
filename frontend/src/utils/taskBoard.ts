@@ -67,3 +67,30 @@ export function parseTaskBoardEvent(payload: unknown): TaskBoardSnapshot | null 
 export function shouldShowTaskBoard(snapshot: TaskBoardSnapshot | null): boolean {
   return snapshot !== null && snapshot.steps.length > 0 && snapshot.task_type !== "general";
 }
+
+/**
+ * Return whether the task board should render for the current chat mode and grill phase.
+ *
+ * @param snapshot Parsed task-board snapshot
+ * @param chatMode Active chat mode
+ * @param grillPhase Current grill workflow phase, if any
+ * @return True when the task board panel should render
+ */
+export function shouldShowTaskBoardInChat(
+  snapshot: TaskBoardSnapshot | null,
+  chatMode: string | undefined,
+  grillPhase: { phase: string } | null,
+  grillEnabled = false,
+): boolean {
+  if (!shouldShowTaskBoard(snapshot)) {
+    return false;
+  }
+  const grillMode = chatMode === "grill" || grillEnabled;
+  if (!grillMode) {
+    return true;
+  }
+  if (!grillPhase) {
+    return false;
+  }
+  return grillPhase.phase === "execute" || grillPhase.phase === "test" || grillPhase.phase === "done";
+}

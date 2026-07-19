@@ -192,11 +192,13 @@ COMMAND_KEYWORDS = re.compile(
 ABS_PATH = re.compile(r"(?<![\w./-])(/[\w./-]+)")
 PATH_AFTER_KEYWORD = re.compile(
     r"(?:"
-    r"(?:speicher(?:n|e|t)?|save|store|write|create|erstell(?:en|t)?|unter|under|in|to|nach|path|pfad|"
+    r"(?:speicher(?:n|e|t)?|save|store|write|create|erstell(?:en|t)?|unter|under|"
+    r"in ordner|in folder|im ordner|im verzeichnis|to folder|to directory|"
+    r"nach|path|pfad|"
     r"lese|lies|read|zeige|show|open|öffne|oeffne)"
-    r"\s*(?:den code|the code|es|it|them|die datei(?:en)?|files?|inhalt|content)?\s*)?"
+    r"\s*(?:den code|the code|es|it|them|die datei(?:en)?|files?|inhalt|content)?\s*)"
     r":?\s*"
-    r"(/[\w./-]+)",
+    r"(?<![\w./-])(/[\w./-]+)",
     re.IGNORECASE,
 )
 
@@ -333,6 +335,43 @@ def extract_text_replacement(user_content: str) -> tuple[str, str] | None:
     return None
 
 
+def resolve_under_workspace_root(path_str: str) -> Path | None:
+    """
+    Resolve an absolute or relative path to an absolute path under workspace root.
+
+    Absolute paths under the user's home directory that omit the workspace root
+    segment (for example ``/home/user/GitHub/project`` when the workspace root is
+    ``/home/user/Dokumente``) are mapped under the configured workspace root.
+
+    :param path_str: Absolute or relative path from user text
+    :return: Resolved absolute path inside the workspace root, or None
+    """
+    raw = path_str.strip().strip("'\"")
+    if not raw:
+        return None
+
+    root = settings.workspace_root.resolve()
+    try:
+        candidate = Path(raw)
+        if candidate.is_absolute():
+            resolved = candidate.resolve()
+            if str(resolved).startswith(str(root)):
+                return resolved
+            home = Path.home().resolve()
+            if str(resolved).startswith(str(home)):
+                alternate = (root / resolved.relative_to(home)).resolve()
+                if str(alternate).startswith(str(root)):
+                    return alternate
+            return None
+
+        target = (root / raw.lstrip("/")).resolve()
+        if str(target).startswith(str(root)):
+            return target
+        return None
+    except (OSError, ValueError):
+        return None
+
+
 def _to_workspace_relative(path_str: str) -> tuple[str | None, str | None]:
     """
     Convert a user path to workspace-relative form.
@@ -340,24 +379,13 @@ def _to_workspace_relative(path_str: str) -> tuple[str | None, str | None]:
     :param path_str: Absolute or relative path from user text
     :return: Tuple of (relative_path, directory_relative) or (None, None)
     """
-    raw = path_str.strip().strip("'\"")
-    if not raw:
+    resolved = resolve_under_workspace_root(path_str)
+    if resolved is None:
         return None, None
 
     root = settings.workspace_root.resolve()
     try:
-        candidate = Path(raw)
-        if candidate.is_absolute():
-            resolved = candidate.resolve()
-            if not str(resolved).startswith(str(root)):
-                return None, None
-            relative = str(resolved.relative_to(root))
-        else:
-            target = (root / raw.lstrip("/")).resolve()
-            if not str(target).startswith(str(root)):
-                return None, None
-            relative = str(target.relative_to(root))
-
+        relative = str(resolved.relative_to(root))
         if relative.endswith("/"):
             relative = relative.rstrip("/")
         directory = relative if not CODE_EXTENSIONS.search(Path(relative).name) else str(
@@ -368,6 +396,47 @@ def _to_workspace_relative(path_str: str) -> tuple[str | None, str | None]:
         return relative, directory
     except (OSError, ValueError):
         return None, None
+
+
+def _filter_embedded_partial_paths(paths: list[str]) -> list[str]:
+    """
+    Drop path fragments that only match inside a longer explicit path.
+
+    Example: ``/emailsender/for`` inside ``GitHub/emailsender/for`` must be ignored
+    when ``/home/user/Dokumente/GitHub/emailsender`` is also present.
+
+    :param paths: Raw extracted path strings
+    :return: Filtered path list
+    """
+    if len(paths) < 2:
+        return paths
+
+    normalized = [path.strip().rstrip("/") for path in paths if path.strip()]
+    keep: list[str] = []
+    for candidate in normalized:
+        fragment = candidate.lstrip("/")
+        if not fragment:
+            continue
+        embedded = False
+        for other in normalized:
+            if other == candidate:
+                continue
+            other_norm = other.replace("\\", "/")
+            candidate_norm = candidate.replace("\\", "/")
+            if other_norm.endswith(candidate_norm):
+                embedded = True
+                break
+            if (
+                candidate.startswith("/")
+                and not candidate.startswith(str(Path.home()))
+                and fragment in other_norm.split("/")
+                and other_norm.endswith(fragment)
+            ):
+                embedded = True
+                break
+        if not embedded:
+            keep.append(candidate)
+    return keep or normalized
 
 
 def _extract_paths(user_content: str) -> list[str]:
@@ -392,7 +461,7 @@ def _extract_paths(user_content: str) -> list[str]:
             seen.add(path)
             found.append(path)
 
-    return found
+    return _filter_embedded_partial_paths(found)
 
 
 def detect_workspace_intent(user_content: str) -> WorkspaceIntent:

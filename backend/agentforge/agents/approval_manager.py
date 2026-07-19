@@ -10,10 +10,16 @@ from agentforge.models.schemas import (
     ApprovalRequest,
     ApprovalResponse,
     ApprovalResumeState,
+    GrillResumeState,
     OrchestrationResumeState,
 )
 
-ResumeState = ApprovalResumeState | AgendaResumeState | OrchestrationResumeState
+ResumeState = (
+    ApprovalResumeState
+    | AgendaResumeState
+    | OrchestrationResumeState
+    | GrillResumeState
+)
 
 
 class ApprovalManager:
@@ -93,7 +99,7 @@ class ApprovalManager:
     def set_resume_state(
         self,
         approval_id: str,
-        state: dict[str, Any] | ApprovalResumeState | AgendaResumeState,
+        state: dict[str, Any] | ApprovalResumeState | AgendaResumeState | OrchestrationResumeState | GrillResumeState,
     ) -> None:
         """
         Store orchestration continuation state for an approval request.
@@ -101,8 +107,14 @@ class ApprovalManager:
         :param approval_id: Approval request identifier
         :param state: Serializable continuation state
         """
-        if isinstance(state, (ApprovalResumeState, AgendaResumeState, OrchestrationResumeState)):
+        if isinstance(
+            state,
+            (ApprovalResumeState, AgendaResumeState, OrchestrationResumeState, GrillResumeState),
+        ):
             self._resume_states[approval_id] = state
+            return
+        if isinstance(state, dict) and state.get("session_snapshot") is not None:
+            self._resume_states[approval_id] = GrillResumeState.model_validate(state)
             return
         if isinstance(state, dict) and state.get("step_index") is not None:
             self._resume_states[approval_id] = AgendaResumeState.model_validate(state)
@@ -119,8 +131,13 @@ class ApprovalManager:
         state = self._resume_states.pop(approval_id, None)
         if state is None:
             return None
-        if isinstance(state, (ApprovalResumeState, AgendaResumeState, OrchestrationResumeState)):
+        if isinstance(
+            state,
+            (ApprovalResumeState, AgendaResumeState, OrchestrationResumeState, GrillResumeState),
+        ):
             return state
+        if isinstance(state, dict) and state.get("session_snapshot") is not None:
+            return GrillResumeState.model_validate(state)
         if isinstance(state, dict) and state.get("kind") and state.get("step_index") is None:
             return OrchestrationResumeState.model_validate(state)
         if isinstance(state, dict) and state.get("step_index") is not None:

@@ -3,6 +3,7 @@ import type { Chat, ChatRunStatus, OrchestrationMode } from "../types";
 import { useI18n } from "../hooks/useI18n";
 import { AgentRunningClock } from "./AgentRunningClock";
 import { ChatCompletedCheck } from "./ChatCompletedCheck";
+import { formatChatModeLabel } from "../utils/grill";
 
 interface SidebarProps {
   chats: Chat[];
@@ -291,11 +292,13 @@ export function Sidebar({
                   }}
                 />
                 <span className="chat-mode">
-                  {chat.mode === "multi"
-                    ? t("chat.multiAgent")
-                    : chat.mode === "quick"
-                      ? t("chat.quickChat")
-                      : t("chat.singleAgent")}
+                  {formatChatModeLabel(chat, {
+                    quickChat: t("chat.quickChat"),
+                    singleAgent: t("chat.singleAgent"),
+                    multiAgent: t("chat.multiAgent"),
+                    grillMode: t("chat.grillMode"),
+                    grillBadge: t("chat.grillBadge"),
+                  })}
                 </span>
               </div>
             ) : (
@@ -329,11 +332,13 @@ export function Sidebar({
                   </span>
                 </div>
                 <span className="chat-mode">
-                  {chat.mode === "multi"
-                    ? t("chat.multiAgent")
-                    : chat.mode === "quick"
-                      ? t("chat.quickChat")
-                      : t("chat.singleAgent")}
+                  {formatChatModeLabel(chat, {
+                    quickChat: t("chat.quickChat"),
+                    singleAgent: t("chat.singleAgent"),
+                    multiAgent: t("chat.multiAgent"),
+                    grillMode: t("chat.grillMode"),
+                    grillBadge: t("chat.grillBadge"),
+                  })}
                 </span>
               </button>
             )}

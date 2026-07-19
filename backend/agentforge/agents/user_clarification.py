@@ -11,6 +11,7 @@ from agentforge.models.schemas import (
     AgendaResumeState,
     ApprovalResumeState,
     OrchestrationResumeState,
+    GrillResumeState,
     UserChoiceOption,
 )
 
@@ -26,6 +27,8 @@ class ClarificationKind(StrEnum):
     AGENT_BLOCKED = "agent_blocked"
     AGENT_QUESTION = "agent_question"
     WORKFLOW_INCOMPLETE = "workflow_incomplete"
+    GRILL_QUESTION = "grill_question"
+    GRILL_PLAN_REVIEW = "grill_plan_review"
     GENERIC = "generic"
 
 
@@ -93,6 +96,28 @@ def build_clarification_options(
     if kind_value == ClarificationKind.WORKFLOW_INCOMPLETE:
         return [STANDARD_RETRY, STANDARD_SKIP, STANDARD_CUSTOM, STANDARD_ABORT]
 
+    if kind_value == ClarificationKind.GRILL_QUESTION:
+        return [
+            UserChoiceOption(
+                id="accept_recommended",
+                label="Accept recommended answer",
+                description="Use the suggested answer for this question.",
+            ),
+            STANDARD_CUSTOM,
+            STANDARD_ABORT,
+        ]
+
+    if kind_value == ClarificationKind.GRILL_PLAN_REVIEW:
+        return [
+            UserChoiceOption(
+                id="approve_plan",
+                label="Approve plan and build",
+                description="Start implementation using the generated plan.",
+            ),
+            STANDARD_CUSTOM,
+            STANDARD_ABORT,
+        ]
+
     return [STANDARD_RETRY, STANDARD_CUSTOM, STANDARD_ABORT]
 
 
@@ -108,6 +133,8 @@ def allows_custom_input_for_kind(kind: ClarificationKind | str) -> bool:
         ClarificationKind.AGENT_BLOCKED,
         ClarificationKind.AGENT_QUESTION,
         ClarificationKind.WORKFLOW_INCOMPLETE,
+        ClarificationKind.GRILL_QUESTION,
+        ClarificationKind.GRILL_PLAN_REVIEW,
         ClarificationKind.GENERIC,
     }
 
@@ -121,6 +148,7 @@ async def request_clarification(
         AgendaResumeState
         | OrchestrationResumeState
         | ApprovalResumeState
+        | GrillResumeState
         | dict[str, Any]
     ),
     on_event: Callable | None,
@@ -143,6 +171,8 @@ async def request_clarification(
     context: dict[str, Any] = {}
     if isinstance(resume_state, OrchestrationResumeState):
         context = dict(resume_state.context)
+    elif isinstance(resume_state, GrillResumeState):
+        context = dict(resume_state.session_snapshot)
     elif isinstance(resume_state, AgendaResumeState):
         context = {
             "step_index": resume_state.step_index,
