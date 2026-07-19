@@ -12,7 +12,10 @@ from agentforge.agents.user_clarification import (
     ClarificationKind,
     build_clarification_options,
     is_clarification_pending,
+    should_skip_clarification_escalation,
 )
+from agentforge.agents.task_state import TaskType, build_task_state, seed_edit_facts
+from agentforge.agents.workspace_intent import detect_workspace_intent
 from agentforge.models.schemas import ApprovalResponse, OrchestrationResumeState
 from tests.helpers.orchestration_test_helpers import make_team_loop, run_orchestration
 
@@ -198,3 +201,18 @@ def test_is_clarification_pending_detects_marker() -> None:
     """Clarification pending marker is recognized by helper."""
     assert is_clarification_pending("[CLARIFICATION_PENDING]")
     assert not is_clarification_pending("[ASK_USER] Need help")
+
+
+def test_should_skip_clarification_for_deterministic_read_errors() -> None:
+    """Read prompts with prefetch errors should not escalate to clarification."""
+    from agentforge.agents.task_state import seed_read_facts
+
+    prompt = "Read GitHub/Test12/fehlt.txt"
+    intent = detect_workspace_intent(prompt)
+    task_state = build_task_state(prompt, intent)
+    seed_read_facts(
+        task_state,
+        {"GitHub/Test12/fehlt.txt": "[ERROR] File not found"},
+    )
+
+    assert should_skip_clarification_escalation(task_state, intent) is True

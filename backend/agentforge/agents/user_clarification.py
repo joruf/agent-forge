@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from agentforge.agents.approval_manager import approval_manager
 from agentforge.models.schemas import (
@@ -13,6 +13,10 @@ from agentforge.models.schemas import (
     OrchestrationResumeState,
     UserChoiceOption,
 )
+
+if TYPE_CHECKING:
+    from agentforge.agents.task_state import TaskState
+    from agentforge.agents.workspace_intent import WorkspaceIntent
 
 
 class ClarificationKind(StrEnum):
@@ -198,3 +202,31 @@ def is_clarification_pending(content: str) -> bool:
     :return: True when orchestration should pause for user choice
     """
     return content.strip().startswith(CLARIFICATION_PENDING_PREFIX)
+
+
+def should_skip_clarification_escalation(
+    task_state: TaskState | None,
+    intent: WorkspaceIntent | None,
+) -> bool:
+    """
+    Return True when weak-retry escalation should not open a clarification dialog.
+
+    Deterministic read prefetch already produced a user-facing outcome (content or
+    error), so the orchestrator should synthesize a final answer instead of pausing.
+
+    :param task_state: Active task board
+    :param intent: Parsed workspace intent
+    :return: True when clarification escalation should be skipped
+    """
+    from agentforge.agents.task_state import TaskType
+
+    if task_state is None or intent is None:
+        return False
+    if task_state.task_type != TaskType.READ_AND_DISPLAY:
+        return False
+    if not intent.wants_file_read or intent.wants_file_creation:
+        return False
+    return any(
+        fact.path and fact.kind in {"file_content", "file_error"}
+        for fact in task_state.facts
+    )

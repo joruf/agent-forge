@@ -1420,11 +1420,15 @@ def _step_is_complete(
     if action == "write_file":
         if not path:
             return bool(task_state.verified_facts("file_written"))
-        return any(
-            _normalize_relative_path(fact.path) == _normalize_relative_path(path)
-            for fact in task_state.verified_facts("file_written")
-            if fact.path
-        )
+        normalized = _normalize_relative_path(path)
+        for kind in ("file_written", "file_edited"):
+            if any(
+                _normalize_relative_path(fact.path) == normalized
+                for fact in task_state.verified_facts(kind)
+                if fact.path
+            ):
+                return True
+        return False
     if action == "read_file":
         if path:
             return task_state.fact_content_for_path(path) is not None

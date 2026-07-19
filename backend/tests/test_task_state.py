@@ -230,6 +230,21 @@ def test_build_task_board_ui_payload_marks_completed_read_step() -> None:
     assert payload["complete"] is True
 
 
+def test_write_file_step_complete_when_file_was_edited() -> None:
+    """Write steps count as done when the target file has a verified edit fact."""
+    from agentforge.agents.task_state import _step_is_complete
+
+    intent = detect_workspace_intent(EIGHT_STEP_H3_1TXT_FITXT_PROMPT)
+    state = build_task_state(EIGHT_STEP_H3_1TXT_FITXT_PROMPT, intent)
+    seed_edit_facts(state, "GitHub/Test12/index.html", replace_from="", replace_to="Hello Bot")
+
+    assert _step_is_complete(
+        "write_file",
+        "GitHub/Test12/index.html",
+        state,
+    ) is True
+
+
 SEVEN_STEP_H3_AND_1TXT_PROMPT = (
     "erstelle mir Verzeichnis mit dem Namen Test12\n"
     "im Ordner GitHub\n"

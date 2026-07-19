@@ -16,6 +16,7 @@ from agentforge.agents.user_clarification import (
     ClarificationKind,
     clarification_pending_marker,
     request_clarification,
+    should_skip_clarification_escalation,
 )
 from agentforge.agents.role_registry import role_registry
 from agentforge.agents.role_router import resolve_single_role
@@ -280,6 +281,7 @@ class ToolLoopMixin:
                         and role_id
                         and not check_completion(task_state).complete
                         and task_state.weak_retry_counts.get(role_id, 0) >= MAX_WEAK_RETRIES
+                        and not should_skip_clarification_escalation(task_state, intent)
                     ):
                         completion = check_completion(task_state)
                         question = build_escalation_message(

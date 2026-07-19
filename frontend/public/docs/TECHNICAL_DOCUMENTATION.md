@@ -485,7 +485,7 @@ All paths are relative to **`AGENTFORGE_WORKSPACE_ROOT`**; path traversal is rej
 7. **Round loop** (`max_multi_rounds`, configurable for Ollama)
    - Per role: `_run_multi_role_turn()`
    - Parallel batches for Reviewer/Security/Tester with `hybrid`
-   - `[ASK_USER]` → pause or deliverable guarantee
+   - `[ASK_USER]` → user-choice modal (`agent_question`) or deliverable guarantee
 8. PM synthesis / final response
 9. Weak-content retries on incomplete answers
 
@@ -573,9 +573,11 @@ Single mode: `resolve_single_role()` picks role from text or default `developer`
 
 ---
 
-## 16. Approval Manager (Shell Approvals)
+## 16. Approval Manager and User-Choice Dialogs
 
-**File:** `agents/approval_manager.py`
+**Files:** `agents/approval_manager.py`, `agents/user_clarification.py`, `agents/orchestrator_mixins/clarification.py`
+
+### Shell command approvals
 
 Shell commands go through `shell_security.classify_shell_command()`:
 
@@ -587,6 +589,26 @@ Shell commands go through `shell_security.classify_shell_command()`:
 
 Pending approvals: `GET /api/chats/{id}/approvals`  
 Approve: `POST /api/chats/{id}/approvals/{aid}`
+
+The inline **`ApprovalPanel`** handles binary approve/deny for shell commands.
+
+### User-choice clarification (`action_type: user_choice`)
+
+When the orchestrator cannot proceed deterministically, it pauses and opens a modal **`UserChoiceDialog`** (WebSocket event `user_choice_pending`).
+
+| Kind | Trigger | Typical options |
+|------|---------|-----------------|
+| `missing_content_tag` | Agenda write expects `<h2>` but only `<h3>` exists | Use alternate tag, skip step, abort |
+| `agent_blocked` | Weak agent output after max retries | Retry, custom reply, abort |
+| `agent_question` | Agent output with `[ASK_USER]` | Custom reply, retry, abort |
+| `workflow_incomplete` | Compound workflow missing deliverables | Retry, skip, custom reply, abort |
+
+**Resume states:**
+
+- `AgendaResumeState` — continue `_execute_workspace_agenda_pipeline()` from saved step index (updates task board via `persist_task_board()` + `task_board_updated`)
+- `OrchestrationResumeState` — re-run orchestration with user comment injected
+
+Read-only prompts with prefetch errors skip clarification escalation; the final answer quotes the `[ERROR]` text instead.
 
 ---
 

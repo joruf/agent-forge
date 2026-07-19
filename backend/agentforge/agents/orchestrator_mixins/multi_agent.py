@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
 
 from agentforge.agents.approval_manager import approval_manager
-from agentforge.agents.user_clarification import ClarificationKind, is_clarification_pending
+from agentforge.agents.user_clarification import ClarificationKind, is_clarification_pending, should_skip_clarification_escalation
 from agentforge.agents.role_registry import role_registry
 from agentforge.agents.role_router import resolve_single_role
 from agentforge.agents.task_state import (
@@ -401,7 +401,10 @@ class MultiAgentMixin:
             and not check_completion(task_state).complete
         ):
             retries = increment_weak_retry(task_state, role.id)
-            if retries >= MAX_WEAK_RETRIES:
+            if (
+                retries >= MAX_WEAK_RETRIES
+                and not should_skip_clarification_escalation(task_state, intent)
+            ):
                 completion = check_completion(task_state)
                 content = (
                     "[ASK_USER] "
