@@ -1,64 +1,64 @@
 # AgentForge LLM routing preferences (Ollama model tags)
 # First available model in each list is used (top = highest priority)
+# Tuned for host 192.168.178.27 (≈12 GB VRAM)
 
 tasks:
   coding:
-    - deepseek-coder:6.7b-instruct-q4_K_M
-    - codellama:34b-instruct-q4_K_M
-    - codellama:13b-instruct-q8_0
-    - codellama:7b-instruct-q8_0
-    - qwen2.5:14b-instruct-q4_K_M
+    - qwen2.5-coder:14b
+    - hhao/qwen2.5-coder-tools:14b
+    - deepseek-coder-v2:16b
+    - qwen2.5-coder:7b
 
   code_review:
-    - codellama:13b-instruct-q8_0
-    - deepseek-coder:6.7b-instruct-q4_K_M
-    - codellama:7b-instruct-q8_0
-    - qwen2.5:7b-instruct-q8_0
+    - qwen2.5-coder:14b
+    - deepseek-coder-v2:16b
+    - qwen2.5-coder:7b
 
   architecture:
-    - qwen2.5:14b-instruct-q4_K_M
-    - mixtral:8x7b-instruct-q4_K_M
-    - llama3.1:8b
-    - mistral:7b-instruct-q4_K_M
+    - gemma3:12b-it-qat
+    - gemma3-12b-qat:latest
+    - qwen2.5-coder:14b
+    - gemma3-27b-3060:latest
 
   research:
-    - qwen2.5:7b-instruct-q8_0
-    - gemma2:9b-instruct-q8_0
-    - mistral:7b-instruct-q4_K_M
-    - llama3.1:8b
+    - gemma3:12b-it-qat
+    - gemma3-12b-qat:latest
+    - gemma3-27b-3060:latest
+    - gemma3:27b-it-qat
+    - qwen3:8b
 
   documentation:
-    - gemma2:9b-instruct-q8_0
-    - qwen2.5:7b-instruct-q8_0
-    - llama3.2:3b-instruct-q8_0
-    - llama3.1:8b
+    - gemma3:12b-it-qat
+    - gemma3-12b-qat:latest
+    - qwen3:8b
+    - qwen2.5-coder:7b
 
   coordination:
-    - llama3.1:8b
-    - qwen2.5:7b-instruct-q8_0
-    - mistral:7b-instruct-q4_K_M
-    - gemma2:9b-instruct-q8_0
+    - gemma3:12b-it-qat
+    - qwen3:8b
+    - qwen2.5-coder:14b
 
   sql:
-    - sqlcoder:15b
-    - deepseek-coder:6.7b-instruct-q4_K_M
-    - codellama:13b-instruct-q8_0
+    - qwen2.5-coder:14b
+    - deepseek-coder-v2:16b
+    - qwen2.5-coder:7b
 
   vision:
-    - llama3.2-vision
-    - llava:13b
+    - gemma3:12b-it-qat
+    - gemma3-12b-qat:latest
 
   finance:
-    - mychen76/Fin-R1:Q5
-    - mychen76/Fin-R1:Q6
+    - deepseek-r1:8b
+    - gemma3:12b-it-qat
+    - qwen3:8b
 
   general:
-    - llama3.1:8b
-    - llama3.2:3b-instruct-q8_0
-    - phi3.5:3.8b-mini-instruct-q8_0
-    - qwen2.5:7b-instruct-q8_0
+    - gemma3:12b-it-qat
+    - gemma3-12b-qat:latest
+    - qwen2.5-coder:14b
+    - qwen3:8b
 
   title:
-    - phi3.5:3.8b-mini-instruct-q4_0
-    - llama3.2:3b-instruct-q8_0
-    - llama3.1:8b
+    - qwen2.5-coder:7b
+    - qwen3:8b
+    - deepseek-r1:8b

@@ -192,6 +192,33 @@
       "description": "Größere Qwen-Version für anspruchsvolle Aufgaben"
     },
     {
+      "id": "qwen2.5-coder-7b",
+      "patterns": ["qwen2.5-coder:7b", "qwen2.5-coder-7b"],
+      "family": "qwen",
+      "display_name": "Qwen2.5 Coder 7B",
+      "recommended_tasks": ["coding", "title", "code_review"],
+      "ram_gb": "5-8",
+      "description": "Schnelles Coding-Modell, gut für Titel und leichte Edits"
+    },
+    {
+      "id": "qwen2.5-coder-14b",
+      "patterns": ["qwen2.5-coder:14b", "qwen2.5-coder-14b", "qwen2.5-coder-tools", "hhao/qwen2.5-coder"],
+      "family": "qwen",
+      "display_name": "Qwen2.5 Coder 14B",
+      "recommended_tasks": ["coding", "code_review", "sql", "architecture"],
+      "ram_gb": "10-12",
+      "description": "Bestes lokales Coding-Modell für ~12 GB VRAM"
+    },
+    {
+      "id": "qwen3-8b",
+      "patterns": ["qwen3:8b", "qwen3-8b"],
+      "family": "qwen",
+      "display_name": "Qwen3 8B",
+      "recommended_tasks": ["general", "title", "coordination", "documentation"],
+      "ram_gb": "5-8",
+      "description": "Schnelles Allround-/Titel-Modell"
+    },
+    {
       "id": "gemma2-9b",
       "patterns": ["gemma2:9b", "gemma2"],
       "family": "gemma",
@@ -202,21 +229,21 @@
     },
     {
       "id": "gemma3-12b",
-      "patterns": ["gemma3:12b", "gemma3"],
+      "patterns": ["gemma3:12b", "gemma3-12b", "gemma3:12b-it-qat", "gemma3-12b-qat"],
       "family": "gemma",
       "display_name": "Google Gemma 3 12B",
-      "recommended_tasks": ["documentation", "research", "architecture"],
-      "ram_gb": "13-16",
-      "description": "Neuere Gemma-Generation"
+      "recommended_tasks": ["documentation", "research", "architecture", "general", "coordination"],
+      "ram_gb": "8-12",
+      "description": "Chat/Research auf 12 GB VRAM"
     },
     {
       "id": "gemma3-27b",
-      "patterns": ["gemma3:27b", "tiger-gemma"],
+      "patterns": ["gemma3:27b", "gemma3-27b", "tiger-gemma", "gemma3-27b-3060"],
       "family": "gemma",
-      "display_name": "Gemma / Tiger Gemma 27B",
-      "recommended_tasks": ["research", "architecture", "general"],
-      "ram_gb": "30+",
-      "description": "Großes Gemma-Modell, hohe Qualität"
+      "display_name": "Gemma 3 27B",
+      "recommended_tasks": ["research", "architecture"],
+      "ram_gb": "12+",
+      "description": "Großes Gemma-Modell — auf 12 GB sparsam nutzen"
     },
     {
       "id": "phi3.5-mini",
