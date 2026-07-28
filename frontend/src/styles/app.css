@@ -1278,6 +1278,12 @@ body.sidebar-resizing {
   justify-content: center;
 }
 
+.agent-elapsed-time {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
 .agent-running-clock-wrap {
   display: inline-flex;
   align-items: center;

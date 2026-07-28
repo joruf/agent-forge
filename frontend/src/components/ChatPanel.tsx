@@ -53,6 +53,21 @@ function formatRoutingModel(model: string): string {
   return model.replace(/^ollama\//, "");
 }
 
+/**
+ * Format elapsed seconds as a short "Ns" or "Mm Ss" readout.
+ *
+ * @param totalSeconds Elapsed seconds since the current turn started
+ * @returns Short human-readable duration
+ */
+function formatElapsedSeconds(totalSeconds: number): string {
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
 function readPromptCorrections(message: Message): PromptCorrection[] {
   const raw = message.metadata?.prompt_corrections;
   if (!Array.isArray(raw)) {
@@ -121,6 +136,7 @@ export function ChatPanel({
   const [userChoiceSubmitting, setUserChoiceSubmitting] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [submitError, setSubmitError] = useState("");
   const [contextPluginRuns, setContextPluginRuns] = useState<ContextPluginRun[]>([]);
   const [pendingShellCommands, setPendingShellCommands] = useState<ShellCommandEntry[]>([]);
@@ -201,6 +217,19 @@ export function ChatPanel({
 
   useEffect(() => {
     loadingRef.current = loading;
+  }, [loading]);
+
+  useEffect(() => {
+    if (!loading) {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    const interval = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(interval);
   }, [loading]);
 
   useEffect(() => {
@@ -1557,6 +1586,7 @@ export function ChatPanel({
                   <span className="agent-history-icon">
                     <AgentRunningClock title={t("agentHistory.running")} />
                   </span>
+                  <span className="agent-elapsed-time">{formatElapsedSeconds(elapsedSeconds)}</span>
                 </span>
               </div>
               <ExpandableText text={streamingContent} previewLength={500} />
@@ -1573,6 +1603,7 @@ export function ChatPanel({
                   <span className="agent-history-icon">
                     <AgentRunningClock title={t("agentHistory.running")} />
                   </span>
+                  <span className="agent-elapsed-time">{formatElapsedSeconds(elapsedSeconds)}</span>
                 </span>
               </div>
               <div className="message-loading-text">
