@@ -51,11 +51,87 @@ export function parseTaskBoardEvent(payload: unknown): TaskBoardSnapshot | null 
     task_type: String(data.task_type ?? "general"),
     complete: Boolean(data.complete),
     reason: typeof data.reason === "string" ? data.reason : "",
+    missing: Array.isArray(data.missing)
+      ? data.missing.map((path) => String(path))
+      : undefined,
     targets: Array.isArray(data.targets)
       ? data.targets.map((target) => String(target))
       : [],
     steps: steps.sort((left, right) => left.step_id - right.step_id),
   };
+}
+
+const TASK_BOARD_REASON_KEYS: Record<string, string> = {
+  "Missing verified file content": "taskBoard.reason.missingVerifiedFileContent",
+  "No verified file content collected": "taskBoard.reason.noVerifiedFileContentCollected",
+  "Missing verified writes at required paths": "taskBoard.reason.missingVerifiedWritesAtRequiredPaths",
+  "No verified writes recorded": "taskBoard.reason.noVerifiedWritesRecorded",
+  "Missing verified write_file steps": "taskBoard.reason.missingVerifiedWriteFileSteps",
+  "Missing verified writes before read-back": "taskBoard.reason.missingVerifiedWritesBeforeReadBack",
+  "Missing verified file content after write": "taskBoard.reason.missingVerifiedFileContentAfterWrite",
+  "Missing verified file edits": "taskBoard.reason.missingVerifiedFileEdits",
+  "No directory listing collected": "taskBoard.reason.noDirectoryListingCollected",
+  "No command output collected": "taskBoard.reason.noCommandOutputCollected",
+};
+
+/**
+ * Resolve a task-board blocker reason to an i18n key when known.
+ *
+ * @param reason Raw completion reason from the backend
+ * @return i18n key or null when no mapping exists
+ */
+export function taskBoardReasonKey(reason: string): string | null {
+  const trimmed = reason.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed in TASK_BOARD_REASON_KEYS) {
+    return TASK_BOARD_REASON_KEYS[trimmed];
+  }
+  if (trimmed.startsWith("Files written to wrong location:")) {
+    return "taskBoard.reason.filesWrittenToWrongLocation";
+  }
+  if (trimmed.startsWith("Missing derived .txt file from ")) {
+    return "taskBoard.reason.missingDerivedTxtFile";
+  }
+  if (trimmed.startsWith("Missing content-source write for ")) {
+    return "taskBoard.reason.missingContentSourceWrite";
+  }
+  return null;
+}
+
+/**
+ * Translate a task-board blocker reason for display.
+ *
+ * @param reason Raw completion reason from the backend
+ * @param t i18n translate function
+ * @return Localized reason text
+ */
+export function translateTaskBoardReason(
+  reason: string,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
+  const trimmed = reason.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const key = taskBoardReasonKey(trimmed);
+  if (key === "taskBoard.reason.filesWrittenToWrongLocation") {
+    const detail = trimmed.slice("Files written to wrong location:".length).trim();
+    return t(key, { detail });
+  }
+  if (key === "taskBoard.reason.missingDerivedTxtFile") {
+    const detail = trimmed.slice("Missing derived .txt file from ".length).trim();
+    return t(key, { detail });
+  }
+  if (key === "taskBoard.reason.missingContentSourceWrite") {
+    const detail = trimmed.slice("Missing content-source write for ".length).trim();
+    return t(key, { detail });
+  }
+  if (key) {
+    return t(key);
+  }
+  return trimmed;
 }
 
 /**

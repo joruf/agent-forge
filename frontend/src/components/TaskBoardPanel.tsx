@@ -1,5 +1,6 @@
 import type { TaskBoardSnapshot } from "../types";
 import { useI18n } from "../hooks/useI18n";
+import { translateTaskBoardReason } from "../utils/taskBoard";
 
 interface TaskBoardPanelProps {
   snapshot: TaskBoardSnapshot;
@@ -12,6 +13,7 @@ function actionLabelKey(action: string): string {
 
 export function TaskBoardPanel({ snapshot, embedded = false }: TaskBoardPanelProps) {
   const { t } = useI18n();
+  const reasonText = translateTaskBoardReason(snapshot.reason, t);
 
   return (
     <section
@@ -26,8 +28,19 @@ export function TaskBoardPanel({ snapshot, embedded = false }: TaskBoardPanelPro
           <span className="task-board-complete-badge">{t("taskBoard.complete")}</span>
         )}
       </div>
-      {!snapshot.complete && snapshot.reason && (
-        <p className="task-board-reason" role="status">{snapshot.reason}</p>
+      {!snapshot.complete && reasonText && (
+        <div className="task-board-reason-block" role="status">
+          <p className="task-board-reason">{reasonText}</p>
+          {snapshot.missing && snapshot.missing.length > 0 && (
+            <ul className="task-board-missing">
+              {snapshot.missing.map((path) => (
+                <li key={path}>
+                  <code>{path}</code>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
       <ol className="task-board-steps">
         {snapshot.steps.map((step) => (

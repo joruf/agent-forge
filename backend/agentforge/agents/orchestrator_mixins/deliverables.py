@@ -22,6 +22,7 @@ from agentforge.agents.task_state import (
     build_pm_verification_block,
     build_task_state,
     check_completion,
+    collect_required_write_paths,
     discussion_entry_is_repeat,
     format_role_output_schema,
     format_task_board_block,
@@ -224,8 +225,8 @@ class DeliverablesMixin:
         """
         if task_state is None or not intent.wants_file_creation:
             return
-        planned = plan_deliverable_files(user_content, intent)
-        created = [path for path in planned if file_exists_in_workspace(path)]
+        required = collect_required_write_paths(task_state)
+        created = [path for path in required if file_exists_in_workspace(path)]
         if created:
             seed_write_facts(task_state, created, agent_id=agent_id, round_num=round_num)
 

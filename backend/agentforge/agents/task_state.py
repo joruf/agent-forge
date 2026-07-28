@@ -574,6 +574,11 @@ def record_tool_result_as_fact(
     else:
         path = None
 
+    if tool_name == "write_file" and success:
+        written_match = re.match(r"^Written:\s*(.+)$", (output or "").strip())
+        if written_match:
+            path = written_match.group(1).strip() or path
+
     if path and tool_name in {"write_file", "read_file", "list_directory"}:
         try:
             from agentforge.agents.workspace_path_resolver import resolve_workspace_path
@@ -1528,6 +1533,30 @@ def analyze_write_path_compliance(
     return missing, wrong_location
 
 
+def reconcile_verified_write_facts(task_state: TaskState) -> None:
+    """
+    Seed verified write facts for required paths that already exist on disk.
+
+    :param task_state: Active task board
+    """
+    from agentforge.agents.workspace_executor import file_exists_in_workspace
+
+    written = {
+        _normalize_relative_path(fact.path)
+        for fact in task_state.verified_facts("file_written")
+        if fact.path
+    }
+    to_seed: list[str] = []
+    for path in collect_required_write_paths(task_state):
+        normalized = _normalize_relative_path(path)
+        if not normalized or normalized in written:
+            continue
+        if file_exists_in_workspace(normalized):
+            to_seed.append(normalized)
+    if to_seed:
+        seed_write_facts(task_state, to_seed, source="disk_reconcile")
+
+
 def _path_matches_fact(step_path: str | None, fact_path: str | None) -> bool:
     """
     Return True when a verified fact path belongs to an agenda step path.
@@ -1681,7 +1710,7 @@ def build_task_board_ui_payload(task_state: TaskState) -> dict[str, Any]:
     :param task_state: Active task board
     :return: Serializable task-board payload
     """
-    completion = check_completion(task_state)
+    reconcile_verified_write_facts(task_state)
     steps_payload: list[dict[str, Any]] = []
     active_assigned = False
 
@@ -1706,14 +1735,21 @@ def build_task_board_ui_payload(task_state: TaskState) -> dict[str, Any]:
             }
         )
 
-    return {
+    completion = check_completion(task_state)
+    has_active_step = any(step["status"] == "active" for step in steps_payload)
+    show_blocker = not completion.complete and not has_active_step
+
+    payload: dict[str, Any] = {
         "type": "task_board_updated",
         "task_type": task_state.task_type.value,
         "complete": completion.complete,
-        "reason": completion.reason,
+        "reason": completion.reason if show_blocker else "",
         "targets": list(task_state.targets),
         "steps": steps_payload,
     }
+    if show_blocker and completion.missing:
+        payload["missing"] = list(completion.missing)
+    return payload
 
 
 async def emit_task_board_update(

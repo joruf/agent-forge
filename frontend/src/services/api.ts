@@ -8,6 +8,9 @@ import type {
   LLMRoutingInfo,
   Message,
   ModelCatalogEntry,
+  ModelPerformanceEntry,
+  ModelPerformanceProgress,
+  ModelPerformanceReport,
   ModelSuggestion,
   OrchestrationMode,
   OrchestrationResult,
@@ -70,6 +73,82 @@ export const api = {
     }),
 
   getLLMRouting: () => request<LLMRoutingInfo>("/llm/routing"),
+
+  getModelPerformance: () => request<ModelPerformanceReport>("/llm/performance"),
+
+  runModelPerformanceBenchmark: () =>
+    request<ModelPerformanceReport>("/llm/performance/benchmark", {
+      method: "POST",
+    }),
+
+  runModelPerformanceBenchmarkStream: async (
+    onProgress: (progress: ModelPerformanceProgress, entry?: ModelPerformanceEntry) => void,
+  ): Promise<ModelPerformanceReport> => {
+    const response = await fetch(`${API_BASE}/llm/performance/benchmark/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || response.statusText);
+    }
+    if (!response.body) {
+      throw new Error("Missing benchmark stream body");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalReport: ModelPerformanceReport | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.trim()) {
+          continue;
+        }
+        const event = JSON.parse(line) as {
+          type: string;
+          completed?: number;
+          total?: number;
+          current_model?: string;
+          entry?: ModelPerformanceEntry;
+          report?: ModelPerformanceReport;
+        };
+        if (event.type === "progress") {
+          onProgress(
+            {
+              completed: Number(event.completed ?? 0),
+              total: Number(event.total ?? 0),
+              current_model: String(event.current_model ?? ""),
+            },
+            event.entry,
+          );
+        } else if (event.type === "complete" && event.report) {
+          finalReport = event.report;
+          onProgress(
+            {
+              completed: event.report.total_count,
+              total: event.report.total_count,
+              current_model: "",
+            },
+          );
+        }
+      }
+    }
+
+    if (!finalReport) {
+      throw new Error("Benchmark stream ended without a result");
+    }
+    return finalReport;
+  },
 
   getModelCatalog: () =>
     request<{ tasks: Record<string, { label: string; description: string }>; entries: ModelCatalogEntry[] }>(

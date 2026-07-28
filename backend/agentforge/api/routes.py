@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from agentforge.agents.approval_manager import approval_manager
@@ -32,6 +33,11 @@ from agentforge.models.schemas import (
 from agentforge.llm.cloud_providers import cloud_key_flags
 from agentforge.context import context_registry
 from agentforge.context.catalog import catalog_as_dict
+from agentforge.services.model_performance_service import (
+    benchmark_all_models,
+    get_performance_report,
+    stream_benchmark_all_models,
+)
 from agentforge.services.setup_service import run_all_tests, run_model_access_tests, run_readiness_check
 from agentforge.storage.conversation_store import conversation_store
 from agentforge.storage.setup_store import setup_store
@@ -157,6 +163,7 @@ class SettingsUpdate(BaseModel):
     default_model: str | None = None
     default_memory_tokens: int | None = None
     llm_auto_routing: bool | None = None
+    benchmark_at_startup: bool | None = None
     ui_language: str | None = None
     command_whitelist: list[str] | None = None
     command_blacklist: list[str] | None = None
@@ -250,6 +257,27 @@ async def readiness(include_inference: bool = False) -> dict[str, Any]:
     return await run_readiness_check(include_inference=include_inference)
 
 
+@router.get("/llm/performance")
+async def model_performance() -> dict[str, Any]:
+    """Return stored model throughput and accessibility data."""
+    return get_performance_report()
+
+
+@router.post("/llm/performance/benchmark")
+async def model_performance_benchmark() -> dict[str, Any]:
+    """Benchmark configured models and refresh stored throughput data."""
+    return await benchmark_all_models()
+
+
+@router.post("/llm/performance/benchmark/stream")
+async def model_performance_benchmark_stream() -> StreamingResponse:
+    """Benchmark configured models and stream progress as NDJSON events."""
+    return StreamingResponse(
+        stream_benchmark_all_models(),
+        media_type="application/x-ndjson",
+    )
+
+
 @router.get("/context/catalog")
 async def context_catalog() -> dict[str, Any]:
     """Return metadata for available context plugins."""
@@ -322,6 +350,7 @@ async def get_settings() -> dict[str, Any]:
         "default_model": settings.default_model,
         "default_memory_tokens": settings.default_memory_tokens,
         "llm_auto_routing": settings.llm_auto_routing,
+        "benchmark_at_startup": settings.benchmark_at_startup,
         "llm_request_timeout": settings.llm_request_timeout,
         "override_model": settings.override_model.strip() or None,
         "command_whitelist": settings.command_whitelist,
@@ -362,6 +391,8 @@ async def update_settings(data: SettingsUpdate) -> dict[str, Any]:
         settings.default_model = data.default_model
     if data.llm_auto_routing is not None:
         settings.llm_auto_routing = data.llm_auto_routing
+    if data.benchmark_at_startup is not None:
+        settings.benchmark_at_startup = data.benchmark_at_startup
     if data.default_memory_tokens is not None:
         settings.default_memory_tokens = data.default_memory_tokens
     if data.command_whitelist is not None:

@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
@@ -946,6 +947,7 @@ class AgentOrchestrator(
         peek_buffer = ""
         decided = False
         suppress = False
+        started_at = time.monotonic()
 
         async for event in llm.complete_stream(messages, tools=tools, max_tokens=max_tokens):
             await self._ensure_not_cancelled()
@@ -978,4 +980,14 @@ class AgentOrchestrator(
                     "content": delta,
                 })
 
-        return "".join(parts), llm.config.model, tool_calls, is_error
+        content = "".join(parts)
+        if not is_error and content.strip():
+            from agentforge.services.model_performance_service import record_runtime_performance
+
+            record_runtime_performance(
+                llm.config.model,
+                len(content),
+                max(time.monotonic() - started_at, 0.001),
+            )
+
+        return content, llm.config.model, tool_calls, is_error

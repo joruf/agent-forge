@@ -10,6 +10,9 @@ import type {
   ContextPluginRun,
   ExecutionStrategy,
   Message,
+  ModelPerformanceEntry,
+  ModelPerformanceProgress,
+  ModelPerformanceReport,
   NewChatDraft,
   PromptCorrection,
   ShellCommandEntry,
@@ -23,6 +26,7 @@ import { ApprovalPanel } from "./ApprovalPanel";
 import { UserChoiceDialog } from "./UserChoiceDialog";
 import { ContextPluginLog } from "./ContextPluginLog";
 import { CommandHistoryModal } from "./CommandHistoryModal";
+import { ModelPerformanceModal } from "./ModelPerformanceModal";
 import { ChatWorkflowSidebar } from "./ChatWorkflowSidebar";
 import { RoleContextMenu } from "./RoleContextMenu";
 import { RoleDetailsDialog } from "./RoleDetailsDialog";
@@ -141,6 +145,11 @@ export function ChatPanel({
   const [contextPluginRuns, setContextPluginRuns] = useState<ContextPluginRun[]>([]);
   const [pendingShellCommands, setPendingShellCommands] = useState<ShellCommandEntry[]>([]);
   const [commandHistoryOpen, setCommandHistoryOpen] = useState(false);
+  const [modelPerformanceOpen, setModelPerformanceOpen] = useState(false);
+  const [modelPerformanceReport, setModelPerformanceReport] = useState<ModelPerformanceReport | null>(null);
+  const [modelPerformanceBusy, setModelPerformanceBusy] = useState(false);
+  const [modelPerformanceProgress, setModelPerformanceProgress] = useState<ModelPerformanceProgress | null>(null);
+  const [modelPerformanceError, setModelPerformanceError] = useState("");
   const [messageErrors, setMessageErrors] = useState<Record<string, string>>({});
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [roleContextMenu, setRoleContextMenu] = useState<{ x: number; y: number; role: AgentRole } | null>(null);
@@ -182,6 +191,49 @@ export function ChatPanel({
   );
   const commandApprovals = approvals.filter((approval) => approval.action_type === "command");
   const executedShellCommandCount = countExecutedShellCommands(shellCommandEntries);
+  const measuredModelCount = modelPerformanceReport?.measured_count ?? 0;
+
+  const buildPartialPerformanceReport = (models: ModelPerformanceEntry[]): ModelPerformanceReport => ({
+    models,
+    total_count: models.length,
+    measured_count: models.filter((entry) => entry.tokens_per_second).length,
+  });
+
+  const loadModelPerformance = async (runBenchmark = false) => {
+    setModelPerformanceBusy(true);
+    setModelPerformanceError("");
+    if (runBenchmark) {
+      setModelPerformanceProgress({ completed: 0, total: 0, current_model: "" });
+    } else {
+      setModelPerformanceProgress(null);
+    }
+    try {
+      if (runBenchmark) {
+        const partialModels: ModelPerformanceEntry[] = [];
+        const report = await api.runModelPerformanceBenchmarkStream((progress, entry) => {
+          setModelPerformanceProgress(progress);
+          if (entry) {
+            partialModels.push(entry);
+            setModelPerformanceReport(buildPartialPerformanceReport([...partialModels]));
+          }
+        });
+        setModelPerformanceReport(report);
+      } else {
+        const report = await api.getModelPerformance();
+        setModelPerformanceReport(report);
+      }
+    } catch {
+      setModelPerformanceError(t("modelPerformance.loadFailed"));
+    } finally {
+      setModelPerformanceBusy(false);
+      setModelPerformanceProgress(null);
+    }
+  };
+
+  const openModelPerformance = () => {
+    setModelPerformanceOpen(true);
+    void loadModelPerformance(false);
+  };
   const chatMemorySettings = {
     enabled: true,
     memory_tokens: normalizeMemoryTokens(defaultMemoryTokens),
@@ -218,6 +270,15 @@ export function ChatPanel({
   useEffect(() => {
     loadingRef.current = loading;
   }, [loading]);
+
+  useEffect(() => {
+    if (isQuickMode) {
+      return;
+    }
+    void api.getModelPerformance()
+      .then(setModelPerformanceReport)
+      .catch(() => undefined);
+  }, [isQuickMode, chat?.id]);
 
   useEffect(() => {
     if (!loading) {
@@ -1349,6 +1410,24 @@ export function ChatPanel({
                 <button
                   type="button"
                   className="command-history-btn"
+                  title={t("modelPerformance.open")}
+                  aria-label={t("modelPerformance.openWithCount", { count: measuredModelCount })}
+                  onClick={openModelPerformance}
+                >
+                  <svg className="command-history-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 19h16" />
+                    <path d="M7 16l3-8 3 5 2-4 3 7" />
+                    <circle cx="7" cy="7" r="1.5" />
+                  </svg>
+                </button>
+                <span className="command-history-count" aria-hidden="true">
+                  {measuredModelCount}
+                </span>
+              </div>
+              <div className="command-history-control">
+                <button
+                  type="button"
+                  className="command-history-btn"
                   title={t("shellCommands.open")}
                   aria-label={t("shellCommands.openWithCount", { count: executedShellCommandCount })}
                   onClick={() => setCommandHistoryOpen(true)}
@@ -1689,6 +1768,15 @@ export function ChatPanel({
         open={commandHistoryOpen}
         entries={shellCommandEntries}
         onClose={() => setCommandHistoryOpen(false)}
+      />
+      <ModelPerformanceModal
+        open={modelPerformanceOpen}
+        report={modelPerformanceReport}
+        busy={modelPerformanceBusy}
+        progress={modelPerformanceProgress}
+        error={modelPerformanceError}
+        onClose={() => setModelPerformanceOpen(false)}
+        onRefresh={() => void loadModelPerformance(true)}
       />
     </main>
   );

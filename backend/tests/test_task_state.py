@@ -25,6 +25,7 @@ from agentforge.agents.task_state import (
     parse_reviewer_verdict,
     parse_tester_severity,
     record_tool_result_as_fact,
+    reconcile_verified_write_facts,
     seed_edit_facts,
     seed_read_facts,
     seed_step_error_fact,
@@ -385,3 +386,85 @@ def test_seed_step_error_fact_surfaces_in_workflow_final_response() -> None:
     report = check_completion(state)
     assert report.complete is False
     assert "no `<h2>` found" in report.reason
+
+
+WRITE_THEN_READ_PROMPT = (
+    "erstelle GitHub/Test12/hello.txt mit dem Inhalt Hello\n"
+    "lese danach GitHub/Test12/hello.txt aus"
+)
+
+
+def test_record_tool_result_as_fact_uses_written_output_path() -> None:
+    """write_file facts use the resolved path from the Written: output line."""
+    intent = detect_workspace_intent(WRITE_THEN_READ_PROMPT)
+    state = build_task_state(WRITE_THEN_READ_PROMPT, intent)
+
+    record_tool_result_as_fact(
+        state,
+        "write_file",
+        '{"path": "hello.txt", "content": "Hello"}',
+        "Written: GitHub/Test12/hello.txt",
+        True,
+        "developer",
+        1,
+    )
+
+    written_paths = {
+        fact.path for fact in state.verified_facts("file_written") if fact.path
+    }
+    assert "GitHub/Test12/hello.txt" in written_paths
+
+
+def test_reconcile_verified_write_facts_seeds_disk_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Required paths that exist on disk become verified write facts."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    file_path = workspace / "hello.txt"
+    file_path.write_text("Hello", encoding="utf-8")
+    monkeypatch.setattr(settings, "workspace_root", workspace)
+
+    intent = detect_workspace_intent(WRITE_THEN_READ_PROMPT)
+    state = build_task_state(WRITE_THEN_READ_PROMPT, intent)
+
+    reconcile_verified_write_facts(state)
+
+    written_paths = {
+        fact.path for fact in state.verified_facts("file_written") if fact.path
+    }
+    assert "hello.txt" in written_paths
+    missing, _wrong_location = analyze_write_path_compliance(state)
+    assert "hello.txt" not in missing
+
+
+def test_build_task_board_ui_payload_hides_reason_during_active_step() -> None:
+    """Blocker reasons stay hidden while a plan step is still in progress."""
+    intent = detect_workspace_intent(WRITE_THEN_READ_PROMPT)
+    state = build_task_state(WRITE_THEN_READ_PROMPT, intent)
+
+    payload = build_task_board_ui_payload(state)
+
+    assert payload["complete"] is False
+    assert payload["reason"] == ""
+    assert any(step["status"] == "active" for step in payload["steps"])
+
+
+def test_build_task_board_ui_payload_includes_missing_when_reason_shown() -> None:
+    """Blocker payloads include missing paths when a reason is exposed."""
+    prompt = (
+        "erstelle mir ein Programm unter /home/joruf/GitHub/emailsender\n"
+        "named SimpleEmailSender.php"
+    )
+    intent = detect_workspace_intent(prompt)
+    state = build_task_state(prompt, intent)
+    completion = check_completion(state)
+    assert completion.missing
+
+    state.plan_steps = []
+    payload = build_task_board_ui_payload(state)
+
+    assert payload["complete"] is False
+    assert payload["reason"] == "Missing verified writes at required paths"
+    assert payload.get("missing") == ["GitHub/emailsender/SimpleEmailSender.php"]

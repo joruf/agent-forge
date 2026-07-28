@@ -40,6 +40,7 @@ export default function App() {
   const [readinessExpanded, setReadinessExpanded] = useState(false);
   const [chatRunStatus, setChatRunStatus] = useState<Record<string, ChatRunStatus>>({});
   const setupDismissedRef = useRef(false);
+  const benchmarkStartedRef = useRef(false);
   const languagePickerOpenRef = useRef(languagePickerOpen);
   languagePickerOpenRef.current = languagePickerOpen;
   const { theme, setTheme } = useTheme();
@@ -136,6 +137,19 @@ export default function App() {
       void checkReadiness();
     }
   }, [backendOnline, settings?.ollama_base_url, settings?.default_model, checkReadiness]);
+
+  useEffect(() => {
+    if (
+      !backendOnline
+      || !settings?.benchmark_at_startup
+      || !readiness?.chat_ready
+      || benchmarkStartedRef.current
+    ) {
+      return;
+    }
+    benchmarkStartedRef.current = true;
+    void api.runModelPerformanceBenchmark().catch(() => undefined);
+  }, [backendOnline, settings?.benchmark_at_startup, readiness?.chat_ready]);
 
   useEffect(() => {
     void refresh();

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseTaskBoardEvent, shouldShowTaskBoard } from "./taskBoard";
+import { createTranslator } from "../i18n";
+import {
+  parseTaskBoardEvent,
+  shouldShowTaskBoard,
+  taskBoardReasonKey,
+  translateTaskBoardReason,
+} from "./taskBoard";
 
 describe("parseTaskBoardEvent", () => {
   it("parses valid task board websocket payloads", () => {
@@ -35,6 +41,29 @@ describe("parseTaskBoardEvent", () => {
     expect(snapshot?.steps[1].action).toBe("write_file");
   });
 
+  it("parses optional missing paths", () => {
+    const snapshot = parseTaskBoardEvent({
+      type: "task_board_updated",
+      task_type: "write_then_read",
+      complete: false,
+      reason: "Missing verified writes at required paths",
+      missing: ["GitHub/Test12/hello.txt"],
+      targets: ["GitHub/Test12/hello.txt"],
+      steps: [
+        {
+          step_id: 1,
+          action: "write_file",
+          assignee: "developer",
+          detail: "Write GitHub/Test12/hello.txt",
+          path: "GitHub/Test12/hello.txt",
+          status: "active",
+        },
+      ],
+    });
+
+    expect(snapshot?.missing).toEqual(["GitHub/Test12/hello.txt"]);
+  });
+
   it("returns null for unrelated events", () => {
     expect(parseTaskBoardEvent({ type: "complete" })).toBeNull();
     expect(parseTaskBoardEvent(null)).toBeNull();
@@ -65,5 +94,30 @@ describe("shouldShowTaskBoard", () => {
         steps: [{ step_id: 1, action: "write_file", assignee: "developer", detail: "x", path: "a.txt", status: "active" }],
       }),
     ).toBe(true);
+  });
+});
+
+describe("translateTaskBoardReason", () => {
+  it("maps known backend reasons to i18n keys", () => {
+    expect(
+      taskBoardReasonKey("Missing verified writes at required paths"),
+    ).toBe("taskBoard.reason.missingVerifiedWritesAtRequiredPaths");
+  });
+
+  it("translates known reasons in German", () => {
+    const t = createTranslator("de");
+    expect(
+      translateTaskBoardReason(
+        "Missing verified writes at required paths",
+        t,
+      ),
+    ).toContain("Verifizierte Schreibvorgänge");
+  });
+
+  it("falls back to the raw reason when unmapped", () => {
+    const t = createTranslator("en");
+    expect(translateTaskBoardReason("Custom blocker from reviewer", t)).toBe(
+      "Custom blocker from reviewer",
+    );
   });
 });

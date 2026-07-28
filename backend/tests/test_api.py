@@ -66,19 +66,66 @@ def test_settings_get_and_patch(api_client: TestClient) -> None:
     assert get_resp.status_code == 200
     body = get_resp.json()
     assert "workspace_root" in body
+    assert "benchmark_at_startup" in body
     assert "has_openai_key" in body
     assert "has_anthropic_key" in body
     assert "has_gemini_key" in body
 
     patch_resp = api_client.patch(
         "/api/settings",
-        json={"default_memory_tokens": 64000, "ui_language": "de", "anthropic_api_key": "sk-ant-test"},
+        json={
+            "default_memory_tokens": 64000,
+            "ui_language": "de",
+            "anthropic_api_key": "sk-ant-test",
+            "benchmark_at_startup": True,
+        },
     )
     assert patch_resp.status_code == 200
     patched = patch_resp.json()
     assert patched["default_memory_tokens"] == 64000
     assert patched["ui_language"] == "de"
+    assert patched["benchmark_at_startup"] is True
     assert patched["has_anthropic_key"] is True
+
+
+def test_model_performance_endpoints(api_client: TestClient, monkeypatch) -> None:
+    """Performance endpoints return stored model throughput data."""
+
+    async def fake_benchmark():
+        return {
+            "models": [
+                {
+                    "model": "ollama/llama3.1:8b",
+                    "display_name": "Llama 3.1",
+                    "accessible": True,
+                    "tokens_per_second": 12.3,
+                    "sample_count": 1,
+                    "last_measured_at": "2026-07-28T12:00:00+00:00",
+                    "source": "benchmark",
+                    "last_error": None,
+                }
+            ],
+            "measured_count": 1,
+            "total_count": 1,
+        }
+
+    monkeypatch.setattr("agentforge.api.routes.benchmark_all_models", fake_benchmark)
+    monkeypatch.setattr(
+        "agentforge.api.routes.get_performance_report",
+        lambda: {
+            "models": [],
+            "measured_count": 0,
+            "total_count": 0,
+        },
+    )
+
+    get_resp = api_client.get("/api/llm/performance")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["total_count"] == 0
+
+    post_resp = api_client.post("/api/llm/performance/benchmark")
+    assert post_resp.status_code == 200
+    assert post_resp.json()["measured_count"] == 1
 
 
 def test_setup_workflow(api_client: TestClient) -> None:

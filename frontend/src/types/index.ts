@@ -64,6 +64,7 @@ export interface TaskBoardSnapshot {
   task_type: string;
   complete: boolean;
   reason: string;
+  missing?: string[];
   targets: string[];
   steps: TaskBoardStep[];
 }
@@ -107,6 +108,7 @@ export interface AppSettings {
   default_model: string;
   default_memory_tokens: number;
   llm_auto_routing: boolean;
+  benchmark_at_startup: boolean;
   command_whitelist: string[];
   command_blacklist: string[];
   has_openai_key: boolean;
@@ -144,6 +146,29 @@ export interface OrchestrationResult {
   title?: string;
   resolved_role_id?: string;
   effective_execution_strategy?: ExecutionStrategy;
+}
+
+export interface ModelPerformanceEntry {
+  model: string;
+  display_name: string;
+  accessible: boolean;
+  tokens_per_second: number | null;
+  sample_count: number;
+  last_measured_at: string;
+  source: string;
+  last_error?: string | null;
+}
+
+export interface ModelPerformanceReport {
+  models: ModelPerformanceEntry[];
+  measured_count: number;
+  total_count: number;
+}
+
+export interface ModelPerformanceProgress {
+  completed: number;
+  total: number;
+  current_model: string;
 }
 
 export interface LLMRoutingInfo {

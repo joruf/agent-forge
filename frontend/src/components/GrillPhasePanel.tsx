@@ -54,7 +54,7 @@ export function GrillPhasePanel({
         {visiblePhases.map((phase) => {
           const index = phaseIndex(phase);
           let status = "pending";
-          if (index < activeIndex) {
+          if (state.phase === "done" || index < activeIndex) {
             status = "done";
           } else if (index === activeIndex) {
             status = "active";

@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_num_ctx: int = 8192
     llm_auto_routing: bool = True
+    benchmark_at_startup: bool = False
     ui_language: str = "en"
     openai_api_key: str = ""
     openai_api_base: str = ""

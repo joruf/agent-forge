@@ -135,7 +135,22 @@
       "present_to_user": "Ergebnis liefern",
       "analyze": "Koordinieren"
     },
-    "interpretedRequestTitle": "Interpretiert als"
+    "interpretedRequestTitle": "Interpretiert als",
+    "reason": {
+      "missingVerifiedFileContent": "Verifizierter Dateiinhalt fehlt",
+      "noVerifiedFileContentCollected": "Noch kein verifizierter Dateiinhalt erfasst",
+      "missingVerifiedWritesAtRequiredPaths": "Verifizierte Schreibvorgänge an den erforderlichen Pfaden fehlen",
+      "noVerifiedWritesRecorded": "Keine verifizierten Schreibvorgänge erfasst",
+      "missingVerifiedWriteFileSteps": "Verifizierte Schreibschritte fehlen",
+      "missingVerifiedWritesBeforeReadBack": "Verifizierte Schreibvorgänge vor dem Auslesen fehlen",
+      "missingVerifiedFileContentAfterWrite": "Verifizierter Dateiinhalt nach dem Schreiben fehlt",
+      "missingVerifiedFileEdits": "Verifizierte Dateibearbeitungen fehlen",
+      "noDirectoryListingCollected": "Keine Verzeichnisliste erfasst",
+      "noCommandOutputCollected": "Keine Befehlsausgabe erfasst",
+      "filesWrittenToWrongLocation": "Dateien am falschen Speicherort geschrieben: {{detail}}",
+      "missingDerivedTxtFile": "Abgeleitete .txt-Datei fehlt aus {{detail}}",
+      "missingContentSourceWrite": "Inhaltsquellen-Schreibvorgang fehlt für {{detail}}"
+    }
   },
   "shellCommands": {
     "open": "Konsolenbefehle anzeigen",
@@ -153,12 +168,41 @@
       "denied": "Abgelehnt"
     }
   },
+  "modelPerformance": {
+    "open": "Modell-Performance anzeigen",
+    "openWithCount": "Modell-Performance anzeigen ({{count}} gemessen)",
+    "title": "Modell-Performance",
+    "close": "Schließen",
+    "lead": "Verfügbare Modelle und gemessene Ausgabegeschwindigkeit in Tokens pro Sekunde.",
+    "empty": "Noch keine Performance-Daten. Starte einen Benchmark oder einen Chat, um Laufzeit-Messungen zu sammeln.",
+    "refresh": "Benchmark starten",
+    "refreshing": "Benchmark läuft…",
+    "benchmarkHint": "Je nach Anzahl der Modelle und deren Geschwindigkeit kann der Test mehrere Minuten dauern.",
+    "progressStarting": "Benchmark wird vorbereitet…",
+    "progressLabel": "Teste {{completed}} von {{total}}: {{model}}",
+    "loadFailed": "Modell-Performance konnte nicht geladen werden.",
+    "accessibleYes": "Ja",
+    "accessibleNo": "Nein",
+    "columns": {
+      "model": "Modell",
+      "accessible": "Erreichbar",
+      "speed": "Tokens/s",
+      "source": "Quelle",
+      "updated": "Aktualisiert"
+    },
+    "source": {
+      "benchmark": "Benchmark",
+      "runtime": "Laufzeit"
+    }
+  },
   "settings": {
     "title": "Einstellungen",
     "workspaceRoot": "Arbeitsverzeichnis",
     "ollamaUrl": "Ollama URL (remote)",
     "defaultModel": "Standard-Modell (Fallback)",
     "autoRouting": "Automatisches Modell-Routing (Coding, Research, SQL, …)",
+    "benchmarkAtStartup": "Modellgeschwindigkeit beim Start messen",
+    "benchmarkAtStartupHint": "Wenn deaktiviert, werden Tokens/s automatisch während des Chats gesammelt, sobald Modelle Ausgabe liefern.",
     "openaiKey": "OpenAI API-Key",
     "anthropicKey": "Anthropic API-Key (Claude)",
     "geminiKey": "Google Gemini API-Key",

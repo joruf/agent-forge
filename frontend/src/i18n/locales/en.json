@@ -135,7 +135,22 @@
       "present_to_user": "Present result",
       "analyze": "Coordinate"
     },
-    "interpretedRequestTitle": "Interpreted as"
+    "interpretedRequestTitle": "Interpreted as",
+    "reason": {
+      "missingVerifiedFileContent": "Missing verified file content",
+      "noVerifiedFileContentCollected": "No verified file content collected yet",
+      "missingVerifiedWritesAtRequiredPaths": "Missing verified writes at required paths",
+      "noVerifiedWritesRecorded": "No verified writes recorded",
+      "missingVerifiedWriteFileSteps": "Missing verified write steps",
+      "missingVerifiedWritesBeforeReadBack": "Missing verified writes before read-back",
+      "missingVerifiedFileContentAfterWrite": "Missing verified file content after write",
+      "missingVerifiedFileEdits": "Missing verified file edits",
+      "noDirectoryListingCollected": "No directory listing collected",
+      "noCommandOutputCollected": "No command output collected",
+      "filesWrittenToWrongLocation": "Files written to wrong location: {{detail}}",
+      "missingDerivedTxtFile": "Missing derived .txt file from {{detail}}",
+      "missingContentSourceWrite": "Missing content-source write for {{detail}}"
+    }
   },
   "shellCommands": {
     "open": "Show console commands",
@@ -153,12 +168,41 @@
       "denied": "Denied"
     }
   },
+  "modelPerformance": {
+    "open": "Show model performance",
+    "openWithCount": "Show model performance ({{count}} measured)",
+    "title": "Model performance",
+    "close": "Close",
+    "lead": "Available models and measured output speed in tokens per second.",
+    "empty": "No performance data yet. Run a benchmark or start a chat to collect runtime measurements.",
+    "refresh": "Run benchmark",
+    "refreshing": "Benchmark running…",
+    "benchmarkHint": "Depending on the number of models and their speed, the benchmark can take several minutes.",
+    "progressStarting": "Preparing benchmark…",
+    "progressLabel": "Testing {{completed}} of {{total}}: {{model}}",
+    "loadFailed": "Could not load model performance data.",
+    "accessibleYes": "Yes",
+    "accessibleNo": "No",
+    "columns": {
+      "model": "Model",
+      "accessible": "Accessible",
+      "speed": "Tokens/s",
+      "source": "Source",
+      "updated": "Updated"
+    },
+    "source": {
+      "benchmark": "Benchmark",
+      "runtime": "Runtime"
+    }
+  },
   "settings": {
     "title": "Settings",
     "workspaceRoot": "Workspace directory",
     "ollamaUrl": "Ollama URL (remote)",
     "defaultModel": "Default model (fallback)",
     "autoRouting": "Automatic model routing (coding, research, SQL, …)",
+    "benchmarkAtStartup": "Benchmark model speed at startup",
+    "benchmarkAtStartupHint": "When disabled, throughput is collected automatically during chat when models generate output.",
     "openaiKey": "OpenAI API key",
     "anthropicKey": "Anthropic API key (Claude)",
     "geminiKey": "Google Gemini API key",

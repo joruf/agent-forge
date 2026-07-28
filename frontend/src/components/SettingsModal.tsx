@@ -82,6 +82,7 @@ export function SettingsModal({
   const { modalRef, modalSizeStyle } = useSettingsModalSize(open);
   const [defaultMemoryTokens, setDefaultMemoryTokens] = useState<MemoryTokenOption>(DEFAULT_MEMORY_TOKENS);
   const [autoRouting, setAutoRouting] = useState(true);
+  const [benchmarkAtStartup, setBenchmarkAtStartup] = useState(false);
   const [testInference, setTestInference] = useState(true);
   const [modelTestReport, setModelTestReport] = useState<SetupTestReport | null>(null);
   const [modelTestBusy, setModelTestBusy] = useState(false);
@@ -103,6 +104,7 @@ export function SettingsModal({
     if (settings) {
       setDefaultMemoryTokens(normalizeMemoryTokens(settings.default_memory_tokens));
       setAutoRouting(settings.llm_auto_routing);
+      setBenchmarkAtStartup(Boolean(settings.benchmark_at_startup));
       setCommandWhitelist(formatCommandList(settings.command_whitelist));
       setCommandBlacklist(formatCommandList(settings.command_blacklist));
     }
@@ -170,6 +172,7 @@ export function SettingsModal({
       default_model: String(form.get("default_model") ?? ""),
       default_memory_tokens: defaultMemoryTokens,
       llm_auto_routing: autoRouting,
+      benchmark_at_startup: benchmarkAtStartup,
       ui_language: locale,
       command_whitelist: parseCommandList(commandWhitelist),
       command_blacklist: parseCommandList(commandBlacklist),
@@ -304,6 +307,15 @@ export function SettingsModal({
             />
             {t("settings.autoRouting")}
           </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={benchmarkAtStartup}
+              onChange={(event) => setBenchmarkAtStartup(event.target.checked)}
+            />
+            {t("settings.benchmarkAtStartup")}
+          </label>
+          <p className="settings-model-test-hint">{t("settings.benchmarkAtStartupHint")}</p>
           <section className="settings-model-test">
             <div className="settings-model-test-header">
               <div>
