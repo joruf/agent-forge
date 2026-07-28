@@ -10,10 +10,12 @@ from enum import StrEnum
 from typing import Any
 
 from agentforge.memory.store import memory_store
+from agentforge.utils.json_repair import repair_json
 
 GRILL_SESSION_MEMORY_KEY = "_agentforge_grill_session"
 MAX_GRILL_QUESTIONS = 15
 GRILL_COMPLETE_MARKER = "[GRILL_COMPLETE]"
+MAX_GRILL_TEST_RETRIES = 1
 
 FALLBACK_GRILL_QUESTIONS: tuple[tuple[str, str, str], ...] = (
     (
@@ -70,6 +72,7 @@ class GrillSession:
     plan_markdown: str = ""
     summary: str = ""
     role_ids: list[str] = field(default_factory=list)
+    test_retry_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -85,6 +88,7 @@ class GrillSession:
             "plan_markdown": self.plan_markdown,
             "summary": self.summary,
             "role_ids": list(self.role_ids),
+            "test_retry_count": self.test_retry_count,
         }
 
     @classmethod
@@ -117,6 +121,7 @@ class GrillSession:
             plan_markdown=str(payload.get("plan_markdown") or ""),
             summary=str(payload.get("summary") or ""),
             role_ids=[str(role_id) for role_id in payload.get("role_ids") or []],
+            test_retry_count=int(payload.get("test_retry_count") or 0),
         )
 
 
@@ -208,12 +213,20 @@ def parse_grill_interview_response(content: str) -> dict[str, Any] | None:
     if text.startswith(GRILL_COMPLETE_MARKER):
         return {"status": "complete", "summary": text.removeprefix(GRILL_COMPLETE_MARKER).strip()}
     match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return None
+    if match:
+        candidate = match.group(0)
+    else:
+        start = text.find("{")
+        if start == -1:
+            return None
+        candidate = text[start:]
     try:
-        payload = json.loads(match.group(0))
+        payload = json.loads(candidate)
     except json.JSONDecodeError:
-        return None
+        try:
+            payload = json.loads(repair_json(candidate))
+        except json.JSONDecodeError:
+            return None
     return payload if isinstance(payload, dict) else None
 
 
@@ -266,11 +279,12 @@ def fallback_grill_interview_step(session: GrillSession) -> dict[str, Any]:
     }
 
 
-def build_grill_execution_prompt(session: GrillSession) -> str:
+def build_grill_execution_prompt(session: GrillSession, fix_feedback: str = "") -> str:
     """
     Build the user prompt handed to normal orchestration during execute phase.
 
     :param session: Completed grill session with plan
+    :param fix_feedback: Optional prior test-phase FAIL findings to address
     :return: Execution prompt text
     """
     lines = [
@@ -289,6 +303,11 @@ def build_grill_execution_prompt(session: GrillSession) -> str:
     lines.append(
         "\nImplement the plan completely. Use workspace tools for all file changes.",
     )
+    if fix_feedback.strip():
+        lines.append(
+            f"\n## Previous test run FAILED\n{fix_feedback.strip()}\n\n"
+            "Fix these issues before re-submitting.",
+        )
     return "\n".join(lines)
 
 
@@ -321,6 +340,22 @@ def build_grill_test_prompt(session: GrillSession) -> str:
         "- Report PASS or FAIL with concise findings",
     )
     return "\n".join(lines)
+
+
+def parse_grill_test_verdict(content: str) -> bool | None:
+    """
+    Extract the tester's pass/fail verdict from a grill test-phase response.
+
+    :param content: Software tester turn content
+    :return: True for PASS, False for FAIL, None when no clear verdict is found
+    """
+    fail_match = re.search(r"\bFAIL\b", content, re.IGNORECASE)
+    pass_match = re.search(r"\bPASS\b", content, re.IGNORECASE)
+    if fail_match:
+        return False
+    if pass_match:
+        return True
+    return None
 
 
 def build_grill_ui_payload(session: GrillSession) -> dict[str, Any]:

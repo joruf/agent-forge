@@ -337,7 +337,7 @@ class SingleAgentMixin:
                 intervention_queue,
                 on_event,
             )
-            content, model_used = await self._stream_llm_complete(
+            content, model_used, _tool_calls, _is_error = await self._stream_llm_complete(
                 llm,
                 messages,
                 on_event,

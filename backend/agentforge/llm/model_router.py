@@ -132,8 +132,10 @@ class ModelRouter:
         fallback = fallback_model or settings.default_model
         override = settings.override_model.strip()
         if override:
-            installed = await self.list_installed_models()
-            model = model_store.resolve_ollama_litellm_model(override, installed)
+            model = override
+            if override.startswith("ollama/"):
+                installed = await self.list_installed_models()
+                model = model_store.resolve_ollama_litellm_model(override, installed)
             return {
                 "task": task.value,
                 "model": model,

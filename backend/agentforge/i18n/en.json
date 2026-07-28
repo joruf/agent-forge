@@ -50,9 +50,9 @@
   },
   "roles": {
     "developer": { "name": "Developer", "description": "Writes, edits, and refactors code in the workspace." },
-    "reviewer": { "name": "Reviewer", "description": "Reviews code quality, bugs, and best practices." },
-    "architect": { "name": "Architect", "description": "Plans system structure, modules, and interfaces." },
-    "researcher": { "name": "Researcher", "description": "Researches topics and summarizes findings." },
+    "reviewer": { "name": "Reviewer", "description": "Reviews code quality, bugs, and best practices — from shared diffs/snippets in team discussions, or by reading files directly when working alone." },
+    "architect": { "name": "Architect", "description": "Plans system structure, modules, and interfaces; inspects the codebase but leaves full feature implementation to the developer role." },
+    "researcher": { "name": "Researcher", "description": "Researches external topics via web search and memory; has no file access, so cannot inspect this codebase directly." },
     "documentation": { "name": "Documentation", "description": "Creates and maintains documentation and technical writing." },
     "project_manager": { "name": "Project Manager", "description": "Coordinates agents, involves the user when needed, delivers results." },
     "software_tester": { "name": "Software Tester", "description": "Designs test cases, runs tests, and reports quality issues." },
@@ -96,13 +96,15 @@
     "litellm_inference_fail": "Active model {{model}} failed via LiteLLM: {{error}}",
     "readiness_ok": "Models ready for chat",
     "readiness_fail": "Models are not ready for chat",
+    "mock_model_ok": "Using mock model {{model}} — no real LLM required",
     "labels": {
       "default_model": "Default model",
       "registry_ollama": "Registry vs Ollama",
       "cloud_inference": "Cloud inference",
       "litellm_import": "LiteLLM stack",
       "litellm_inference": "LiteLLM inference",
-      "active_model": "Active model"
+      "active_model": "Active model",
+      "mock_model": "Mock model"
     }
   }
 }

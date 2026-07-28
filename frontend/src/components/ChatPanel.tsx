@@ -24,6 +24,8 @@ import { UserChoiceDialog } from "./UserChoiceDialog";
 import { ContextPluginLog } from "./ContextPluginLog";
 import { CommandHistoryModal } from "./CommandHistoryModal";
 import { ChatWorkflowSidebar } from "./ChatWorkflowSidebar";
+import { RoleContextMenu } from "./RoleContextMenu";
+import { RoleDetailsDialog } from "./RoleDetailsDialog";
 import type { GrillPhaseState } from "./GrillPhasePanel";
 import { ExpandableText } from "./ExpandableText";
 import { DEFAULT_MULTI_ROLES, normalizeSingleRoleIds, SINGLE_AUTO_ROLE, sortSdlcRoles } from "../constants/roles";
@@ -96,6 +98,7 @@ interface ChatPanelProps {
   onCommitDraft: (payload: CommitNewChatPayload) => Promise<Chat>;
   onChatUpdated: (chat: Chat) => void;
   onChatRunStateChange: (chatId: string, status: ChatRunStatus | "idle") => void;
+  onRolesChanged?: (roles: AgentRole[]) => void;
 }
 
 export function ChatPanel({
@@ -107,6 +110,7 @@ export function ChatPanel({
   onCommitDraft,
   onChatUpdated,
   onChatRunStateChange,
+  onRolesChanged,
 }: ChatPanelProps) {
   const { t, intlLocale } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -123,6 +127,8 @@ export function ChatPanel({
   const [commandHistoryOpen, setCommandHistoryOpen] = useState(false);
   const [messageErrors, setMessageErrors] = useState<Record<string, string>>({});
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [roleContextMenu, setRoleContextMenu] = useState<{ x: number; y: number; role: AgentRole } | null>(null);
+  const [roleDetailsRole, setRoleDetailsRole] = useState<AgentRole | null>(null);
   const [executionStrategy, setExecutionStrategy] = useState<ExecutionStrategy>("auto");
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLElement>(null);
@@ -177,6 +183,15 @@ export function ChatPanel({
 
   const resolveRoleName = (roleId: string) =>
     orderedRoles.find((role) => role.id === roleId)?.name ?? roleId;
+
+  const openRoleContextMenu = (event: React.MouseEvent, role: AgentRole) => {
+    event.preventDefault();
+    setRoleContextMenu({ x: event.clientX, y: event.clientY, role });
+  };
+
+  const handleRoleSaved = (updated: AgentRole) => {
+    onRolesChanged?.(roles.map((role) => (role.id === updated.id ? updated : role)));
+  };
 
   const trackAgentActivity = (event: Record<string, unknown>) => {
     setAgentActivities((prev) =>
@@ -1347,6 +1362,7 @@ export function ChatPanel({
               className="role-chip"
               title={role.description}
               data-tooltip={role.description}
+              onContextMenu={(event) => openRoleContextMenu(event, role)}
             >
               <input
                 type={panelMode === "single" ? "radio" : "checkbox"}
@@ -1390,6 +1406,22 @@ export function ChatPanel({
         processing={userChoiceSubmitting}
         onChoose={handleUserChoice}
         onDismiss={handleUserChoiceDismiss}
+      />
+      {roleContextMenu && (
+        <RoleContextMenu
+          x={roleContextMenu.x}
+          y={roleContextMenu.y}
+          onViewEdit={() => {
+            setRoleDetailsRole(roleContextMenu.role);
+            setRoleContextMenu(null);
+          }}
+          onClose={() => setRoleContextMenu(null)}
+        />
+      )}
+      <RoleDetailsDialog
+        role={roleDetailsRole}
+        onClose={() => setRoleDetailsRole(null)}
+        onSaved={handleRoleSaved}
       />
 
       <div className="chat-body">

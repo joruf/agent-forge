@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -12,6 +13,7 @@ from agentforge.agents.grill_mode import (
     GrillAnswer,
     GrillPhase,
     GrillSession,
+    MAX_GRILL_TEST_RETRIES,
     build_grill_execution_prompt,
     build_grill_test_prompt,
     build_grill_ui_payload,
@@ -20,11 +22,19 @@ from agentforge.agents.grill_mode import (
     load_grill_session,
     normalize_grill_question,
     parse_grill_interview_response,
+    parse_grill_test_verdict,
     persist_grill_session,
     resolve_grill_execution_mode,
 )
 from agentforge.agents.orchestrator import AgentOrchestrator
-from agentforge.models.schemas import ApprovalResponse, ChatCreate, MessageRole, OrchestrationMode
+from agentforge.models.schemas import (
+    ApprovalResponse,
+    ChatCreate,
+    MessageResponse,
+    MessageRole,
+    OrchestrationMode,
+    OrchestrationResponse,
+)
 from agentforge.storage.conversation_store import conversation_store
 from tests.helpers.orchestration_test_helpers import create_test_chat, patch_chat_ready, run_orchestration
 
@@ -44,6 +54,24 @@ def test_parse_grill_interview_response_complete() -> None:
     payload = parse_grill_interview_response('{"status":"complete","summary":"All clear"}')
     assert payload is not None
     assert payload["status"] == "complete"
+
+
+def test_parse_grill_interview_response_repairs_trailing_comma() -> None:
+    """A trailing comma from a weak model is repaired instead of dropped."""
+    payload = parse_grill_interview_response(
+        '{"status":"question","question":"Who is the user?","recommended_answer":"Devs","why":"Scope",}',
+    )
+    assert payload is not None
+    assert payload["status"] == "question"
+
+
+def test_parse_grill_interview_response_repairs_truncated_json() -> None:
+    """Truncated JSON (missing closing braces) is repaired instead of dropped."""
+    payload = parse_grill_interview_response(
+        '{"status":"question","question":"Who is the user?","recommended_answer":"Devs"',
+    )
+    assert payload is not None
+    assert payload["question"] == "Who is the user?"
 
 
 def test_grill_question_duplicate_detection() -> None:
@@ -103,12 +131,91 @@ def test_grill_session_round_trip_dict() -> None:
         ],
         plan_markdown="# Plan",
         summary="Ready",
+        test_retry_count=1,
     )
     restored = GrillSession.from_dict(session.to_dict())
     assert restored.chat_id == "chat-1"
     assert restored.phase == GrillPhase.CLARIFY
     assert restored.answers[0].answer == "Web"
     assert restored.plan_markdown == "# Plan"
+    assert restored.test_retry_count == 1
+
+
+def test_parse_grill_test_verdict() -> None:
+    """Test-phase verdict is extracted from free-form tester output."""
+    assert parse_grill_test_verdict("Ran the suite: All checks PASS.") is True
+    assert parse_grill_test_verdict("Result: FAIL — missing footer markup.") is False
+    assert parse_grill_test_verdict("I looked at the files but I'm not sure.") is None
+
+
+def test_build_grill_execution_prompt_includes_fix_feedback() -> None:
+    """A fix_feedback string is appended as a dedicated section."""
+    session = GrillSession(chat_id="chat-1", idea="Send email in PHP", plan_markdown="# Plan")
+    prompt = build_grill_execution_prompt(session, fix_feedback="FAIL: missing footer.")
+    assert "Previous test run FAILED" in prompt
+    assert "FAIL: missing footer." in prompt
+
+    prompt_without_feedback = build_grill_execution_prompt(session)
+    assert "Previous test run FAILED" not in prompt_without_feedback
+
+
+@pytest.mark.asyncio
+async def test_run_grill_test_phase_retries_once_on_fail_then_stops(monkeypatch) -> None:
+    """A FAIL verdict triggers exactly one execute+re-test retry, then finalizes DONE."""
+
+    chat = await create_test_chat(mode="single", role_ids=["developer", "software_tester"])
+
+    def make_response(content: str) -> OrchestrationResponse:
+        return OrchestrationResponse(
+            chat_id=chat.id,
+            messages=[
+                MessageResponse(
+                    id="m1",
+                    chat_id=chat.id,
+                    role=MessageRole.ASSISTANT,
+                    content=content,
+                    created_at=datetime.now(timezone.utc),
+                )
+            ],
+            agent_discussions=[],
+            pending_approvals=[],
+        )
+
+    async def fake_single(self, *args, **kwargs) -> OrchestrationResponse:
+        return make_response("Result: FAIL — missing footer markup.")
+
+    retry_calls = {"count": 0}
+
+    async def fake_execute_retry(self, chat_id, session, *args, **kwargs) -> OrchestrationResponse:
+        retry_calls["count"] += 1
+        assert kwargs.get("fix_feedback", "") != ""
+        # Mirrors what the real execute->re-test recursion would eventually do
+        # once the re-verification passes.
+        session.phase = GrillPhase.DONE
+        return make_response("All checks PASS.")
+
+    patch_chat_ready(monkeypatch)
+    monkeypatch.setattr(AgentOrchestrator, "_run_single", fake_single)
+    monkeypatch.setattr(AgentOrchestrator, "_run_grill_execute_phase", fake_execute_retry)
+
+    orchestrator = AgentOrchestrator()
+    session = GrillSession(chat_id=chat.id, idea="Send email in PHP", plan_markdown="# Plan")
+    build_result = make_response("Created SimpleEmailSender.php")
+
+    result = await orchestrator._run_grill_test_phase(
+        chat.id,
+        session,
+        build_result,
+        None,
+        None,
+    )
+
+    assert retry_calls["count"] == 1
+    assert session.test_retry_count == 1
+    assert session.phase == GrillPhase.DONE
+    assert len(result.messages) == 3
+    assert "PASS" in result.messages[-1].content
+    assert MAX_GRILL_TEST_RETRIES == 1
 
 
 def test_build_grill_test_prompt_includes_plan() -> None:

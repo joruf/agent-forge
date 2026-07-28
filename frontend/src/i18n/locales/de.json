@@ -70,6 +70,16 @@
     "autoRole": "Auto",
     "autoRoleDescription": "Erkennt das Thema und wechselt automatisch zum passenden Agenten.",
     "selectRole": "Rolle",
+    "roleContextMenu": {
+      "viewEdit": "Rolle ansehen/bearbeiten"
+    },
+    "roleDetailsDialog": {
+      "title": "Rollendetails",
+      "builtinBadge": "Eingebaut",
+      "customBadge": "Eigene",
+      "builtinNote": "Dies ist eine eingebaute Rolle des Agenten-Teams. Du kannst Beschreibung und Anweisungen anpassen — Änderungen werden gespeichert und ab sofort für diese Rolle verwendet.",
+      "roleId": "Rollen-ID"
+    },
     "executionStrategy": "Ausführung",
     "executionStrategyAuto": "Auto",
     "executionStrategySerial": "Seriell",

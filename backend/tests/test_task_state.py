@@ -19,7 +19,11 @@ from agentforge.agents.task_state import (
     format_inter_round_memory_block,
     format_role_output_schema,
     format_task_board_block,
+    increment_verdict_retry,
     increment_weak_retry,
+    MAX_VERDICT_RETRIES,
+    parse_reviewer_verdict,
+    parse_tester_severity,
     record_tool_result_as_fact,
     seed_edit_facts,
     seed_read_facts,
@@ -191,6 +195,32 @@ def test_increment_weak_retry_builds_escalation_message() -> None:
 
     assert "2 attempts" in message
     assert "Missing verified file content" in message
+
+
+def test_parse_reviewer_verdict() -> None:
+    """Reviewer verdict is extracted from the structured response."""
+    assert parse_reviewer_verdict("VERDICT: fail\nREASON: x\nNOTES: y") == "fail"
+    assert parse_reviewer_verdict("VERDICT: pass\nREASON: x\nNOTES: y") == "pass"
+    assert parse_reviewer_verdict("Looks fine to me.") is None
+
+
+def test_parse_tester_severity() -> None:
+    """Tester/security severity is extracted from the structured response."""
+    assert parse_tester_severity("FINDINGS: x\nSEVERITY: high\nRECOMMENDATION: y") == "high"
+    assert parse_tester_severity("FINDINGS: x\nSEVERITY: low\nRECOMMENDATION: y") == "low"
+    assert parse_tester_severity("No structured findings here.") is None
+
+
+def test_increment_verdict_retry_bounded() -> None:
+    """Verdict-retry counter increments per role and is independent of weak-retry counts."""
+    intent = detect_workspace_intent(READ_PROMPT)
+    state = build_task_state(READ_PROMPT, intent)
+
+    assert increment_verdict_retry(state, "reviewer") == 1
+    assert increment_verdict_retry(state, "reviewer") == 2
+    assert increment_verdict_retry(state, "reviewer") > MAX_VERDICT_RETRIES
+    assert increment_verdict_retry(state, "software_tester") == 1
+    assert state.weak_retry_counts == {}
 
 
 def test_format_role_output_schema_for_reviewer() -> None:

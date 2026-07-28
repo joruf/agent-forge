@@ -200,3 +200,19 @@ async def test_run_readiness_check_ollama(monkeypatch, english_locale) -> None:
     report = await setup_service.run_readiness_check(include_inference=False)
     assert report["chat_ready"] is False
     assert report["blocking_id"] == "ollama"
+
+
+@pytest.mark.asyncio
+async def test_run_readiness_check_mock_model_skips_ollama_probe(monkeypatch, english_locale) -> None:
+    """A mock/-prefixed model reports chat_ready without probing Ollama."""
+
+    async def fail_if_called(url=None):
+        raise AssertionError("test_ollama should not be called for mock models")
+
+    monkeypatch.setattr(setup_service, "test_ollama", fail_if_called)
+    monkeypatch.setattr(settings, "override_model", "mock/mock-1")
+
+    report = await setup_service.run_readiness_check(include_inference=False)
+    assert report["chat_ready"] is True
+    assert report["active_model"] == "mock/mock-1"
+    assert report["blocking_id"] is None

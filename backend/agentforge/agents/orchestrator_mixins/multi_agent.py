@@ -26,8 +26,12 @@ from agentforge.agents.task_state import (
     format_role_output_schema,
     format_task_board_block,
     format_task_plan_block,
+    increment_verdict_retry,
     increment_weak_retry,
     MAX_REPETITION_STALLS,
+    MAX_VERDICT_RETRIES,
+    parse_reviewer_verdict,
+    parse_tester_severity,
     record_tool_result_as_fact,
     seed_read_facts,
     seed_write_facts,
@@ -84,6 +88,12 @@ from agentforge.services.command_audit import (
     execute_shell_command,
     record_command,
 )
+
+
+# Every other multi-agent turn bounds its transcript (transcript[-8:]/transcript[-10:]);
+# the PM final-synthesis turn used the full, unbounded transcript. Durable facts (files
+# read/written, task status) still reach it via the task board block in the system prompt.
+FINAL_SYNTHESIS_TRANSCRIPT_TAIL = 16
 
 
 class MultiAgentMixin:
@@ -189,7 +199,7 @@ class MultiAgentMixin:
                     )
             return (
                 "Final synthesis requested.\n"
-                + "\n".join(transcript)
+                + "\n".join(transcript[-FINAL_SYNTHESIS_TRANSCRIPT_TAIL:])
                 + "\n\nProvide the final result for the user."
                 + (
                     " Mention which files were written to disk."
@@ -259,6 +269,85 @@ class MultiAgentMixin:
             return schema
         return schema
 
+    async def _maybe_fix_verdict_failure(
+        self,
+        *,
+        chat_id: str,
+        role: AgentRole,
+        content: str,
+        round_num: int,
+        user_content: str,
+        transcript: list[str],
+        discussions: list[AgentMessage],
+        memory_context: str,
+        tools: ToolRegistry,
+        memory_scope: str,
+        on_event: Callable | None,
+        intervention_queue: asyncio.Queue[str] | None,
+        workspace_intent: WorkspaceIntent,
+        path_context: str,
+        task_state: TaskState | None,
+    ) -> str:
+        """
+        Run one bounded developer fix-and-reverify cycle after a failing verdict.
+
+        A reviewer "VERDICT: fail" or a software_tester/security "SEVERITY: high"
+        triggers an immediate developer turn (fed by the failure text already in
+        the transcript) followed by a re-run of the same verifying role, bounded
+        by MAX_VERDICT_RETRIES. Stops early if the re-verification repeats a
+        prior message (unfixable task, e.g. a missing file) rather than looping.
+
+        :param role: The role whose turn just produced a verdict
+        :param content: That role's turn content
+        :return: The latest content for this role's turn (post-fix when a retry ran)
+        """
+        verdict_failed = (
+            role.id == "reviewer" and parse_reviewer_verdict(content) == "fail"
+        ) or (
+            role.id in {"software_tester", "security"}
+            and parse_tester_severity(content) == "high"
+        )
+        if not (verdict_failed and task_state is not None):
+            return content
+        if increment_verdict_retry(task_state, role.id) > MAX_VERDICT_RETRIES:
+            return content
+        developer_role = role_registry.get_role("developer")
+        if developer_role is None:
+            return content
+
+        transcript.append(
+            f"System: {role.name} found blocking issues above. "
+            "Developer, fix them directly before continuing."
+        )
+        latest_content = content
+        for fix_role in (developer_role, role):
+            fix_content, fix_routing, fix_discussion = await self._run_multi_role_turn(
+                chat_id=chat_id,
+                role=fix_role,
+                round_num=round_num,
+                user_content=user_content,
+                transcript=transcript,
+                memory_context=memory_context,
+                tools=tools,
+                memory_scope=memory_scope,
+                on_event=on_event,
+                intervention_queue=intervention_queue,
+                workspace_intent=workspace_intent,
+                path_context=path_context,
+                task_state=task_state,
+            )
+            if discussion_entry_is_repeat(fix_role.name, fix_content, transcript):
+                break
+            discussions.append(fix_discussion)
+            transcript.append(f"{fix_role.name}: {fix_content}")
+            if on_event:
+                await on_event({
+                    "type": "agent_message",
+                    "discussion": fix_discussion.model_dump(mode="json"),
+                    "routing": fix_routing,
+                })
+            latest_content = fix_content
+        return latest_content
 
     async def _emit_agent_end(
         self,
@@ -627,6 +716,24 @@ class MultiAgentMixin:
                                 "routing": routing,
                             })
 
+                        content = await self._maybe_fix_verdict_failure(
+                            chat_id=chat_id,
+                            role=batch_role,
+                            content=content,
+                            round_num=round_num,
+                            user_content=user_content,
+                            transcript=transcript,
+                            discussions=discussions,
+                            memory_context=memory_context,
+                            tools=tools,
+                            memory_scope=memory_scope,
+                            on_event=on_event,
+                            intervention_queue=None,
+                            workspace_intent=workspace_intent,
+                            path_context=path_context,
+                            task_state=task_state,
+                        )
+
                         if is_clarification_pending(content):
                             return await self._build_clarification_pause_response(
                                 chat_id,
@@ -686,6 +793,24 @@ class MultiAgentMixin:
                         "discussion": discussion.model_dump(mode="json"),
                         "routing": routing,
                     })
+
+                content = await self._maybe_fix_verdict_failure(
+                    chat_id=chat_id,
+                    role=role,
+                    content=content,
+                    round_num=round_num,
+                    user_content=user_content,
+                    transcript=transcript,
+                    discussions=discussions,
+                    memory_context=memory_context,
+                    tools=tools,
+                    memory_scope=memory_scope,
+                    on_event=on_event,
+                    intervention_queue=intervention_queue,
+                    workspace_intent=workspace_intent,
+                    path_context=path_context,
+                    task_state=task_state,
+                )
 
                 if is_clarification_pending(content):
                     return await self._build_clarification_pause_response(

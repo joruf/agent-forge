@@ -22,8 +22,10 @@ from agentforge.agents.grill_mode import (
     load_grill_session,
     normalize_grill_question,
     parse_grill_interview_response,
+    parse_grill_test_verdict,
     persist_grill_session,
     MAX_GRILL_QUESTIONS,
+    MAX_GRILL_TEST_RETRIES,
 )
 from agentforge.agents.role_registry import role_registry
 from agentforge.agents.user_clarification import (
@@ -630,6 +632,7 @@ class GrillMixin:
         role_ids: list[str],
         on_event: Callable | None,
         intervention_queue,
+        fix_feedback: str = "",
     ) -> OrchestrationResponse:
         """
         Execute the approved plan using the standard multi-agent pipeline.
@@ -639,6 +642,7 @@ class GrillMixin:
         :param role_ids: Roles for implementation
         :param on_event: Optional WebSocket callback
         :param intervention_queue: Optional live intervention queue
+        :param fix_feedback: Optional prior test-phase FAIL findings to address
         :return: Orchestration result from execute phase
         """
         from agentforge.models.schemas import ChatUpdate
@@ -648,7 +652,7 @@ class GrillMixin:
         await persist_grill_session(session)
         await self._emit_grill_phase(on_event, session)
 
-        execution_prompt = build_grill_execution_prompt(session)
+        execution_prompt = build_grill_execution_prompt(session, fix_feedback=fix_feedback)
         from agentforge.agents.task_state import (
             build_task_state,
             emit_task_board_update,
@@ -861,6 +865,43 @@ class GrillMixin:
             prefetched_reads={},
             prompt_normalization=None,
         )
+
+        test_content = test_result.messages[-1].content if test_result.messages else ""
+        if (
+            parse_grill_test_verdict(test_content) is False
+            and session.test_retry_count < MAX_GRILL_TEST_RETRIES
+        ):
+            session.test_retry_count += 1
+            await persist_grill_session(session)
+            retry_result = await self._run_grill_execute_phase(
+                chat_id,
+                session,
+                session.role_ids,
+                on_event,
+                intervention_queue,
+                fix_feedback=test_content,
+            )
+            return OrchestrationResponse(
+                chat_id=chat_id,
+                messages=[*build_result.messages, *test_result.messages, *retry_result.messages],
+                agent_discussions=[
+                    *build_result.agent_discussions,
+                    *test_result.agent_discussions,
+                    *retry_result.agent_discussions,
+                ],
+                pending_approvals=[
+                    *build_result.pending_approvals,
+                    *test_result.pending_approvals,
+                    *retry_result.pending_approvals,
+                ],
+                effective_execution_strategy=retry_result.effective_execution_strategy,
+                resolved_role_id=(
+                    retry_result.resolved_role_id
+                    or test_result.resolved_role_id
+                    or build_result.resolved_role_id
+                ),
+                title=build_result.title or test_result.title or retry_result.title,
+            )
 
         session.phase = GrillPhase.DONE
         await persist_grill_session(session)

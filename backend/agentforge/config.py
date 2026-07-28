@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     default_model: str = "ollama/llama3.1:8b"
     override_model: str = ""
     ollama_base_url: str = "http://localhost:11434"
+    ollama_num_ctx: int = 8192
     llm_auto_routing: bool = True
     ui_language: str = "en"
     openai_api_key: str = ""

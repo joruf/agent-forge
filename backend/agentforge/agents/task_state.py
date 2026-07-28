@@ -25,6 +25,7 @@ MAX_PERSISTED_FACTS = 40
 MAX_FACTS_IN_PROMPT = 12
 MAX_PRIOR_FACTS_IN_PROMPT = 8
 MAX_WEAK_RETRIES = 2
+MAX_VERDICT_RETRIES = 1
 MAX_REPETITION_STALLS = 2
 REPETITION_SIMILARITY_THRESHOLD = 0.85
 MIN_REPETITION_TEXT_LENGTH = 40
@@ -117,6 +118,7 @@ class TaskState:
     prior_targets: list[str] = field(default_factory=list)
     prior_summary: str = ""
     weak_retry_counts: dict[str, int] = field(default_factory=dict)
+    verdict_retry_counts: dict[str, int] = field(default_factory=dict)
 
     def add_fact(self, fact: TaskFact) -> None:
         """
@@ -1028,6 +1030,43 @@ def increment_weak_retry(task_state: TaskState | None, role_id: str | None) -> i
     count = task_state.weak_retry_counts.get(role_id, 0) + 1
     task_state.weak_retry_counts[role_id] = count
     return count
+
+
+def increment_verdict_retry(task_state: TaskState | None, role_id: str | None) -> int:
+    """
+    Track negative-verdict fix retries for one agent role.
+
+    :param task_state: Active task board or None
+    :param role_id: Agent role identifier
+    :return: Updated retry count
+    """
+    if task_state is None or not role_id:
+        return 0
+    count = task_state.verdict_retry_counts.get(role_id, 0) + 1
+    task_state.verdict_retry_counts[role_id] = count
+    return count
+
+
+def parse_reviewer_verdict(content: str) -> str | None:
+    """
+    Extract the reviewer's pass/fail verdict from its structured response.
+
+    :param content: Reviewer turn content
+    :return: "pass", "fail", or None when no verdict is found
+    """
+    match = re.search(r"VERDICT:\s*(pass|fail)", content, re.IGNORECASE)
+    return match.group(1).lower() if match else None
+
+
+def parse_tester_severity(content: str) -> str | None:
+    """
+    Extract the tester/security severity rating from its structured response.
+
+    :param content: Software tester or security turn content
+    :return: "low", "medium", "high", or None when no severity is found
+    """
+    match = re.search(r"SEVERITY:\s*(low|medium|high)", content, re.IGNORECASE)
+    return match.group(1).lower() if match else None
 
 
 def build_escalation_message(

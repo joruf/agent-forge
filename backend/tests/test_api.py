@@ -152,8 +152,10 @@ def test_roles_crud(api_client: TestClient, temp_data_dir, monkeypatch) -> None:
     assert missing.status_code == 404
 
 
-def test_roles_builtin_protected(api_client: TestClient, temp_data_dir, monkeypatch) -> None:
-    """Built-in roles cannot be updated or deleted."""
+def test_roles_builtin_editable_but_not_deletable(
+    api_client: TestClient, temp_data_dir, monkeypatch
+) -> None:
+    """Built-in roles can be edited via the API but still cannot be deleted."""
     roles_dir = temp_data_dir / "roles"
     roles_dir.mkdir()
     isolated_registry = RoleRegistry(roles_dir=roles_dir)
@@ -162,12 +164,15 @@ def test_roles_builtin_protected(api_client: TestClient, temp_data_dir, monkeypa
     update = api_client.put(
         "/api/roles/developer",
         json={
-            "name": "Hacker",
-            "description": "No",
-            "system_prompt": "No",
+            "name": "Dev Lead",
+            "description": "Updated description",
+            "system_prompt": "Updated prompt.",
         },
     )
-    assert update.status_code == 400
+    assert update.status_code == 200
+    body = update.json()
+    assert body["name"] == "Dev Lead"
+    assert body["is_builtin"] is True
 
     delete = api_client.delete("/api/roles/developer")
     assert delete.status_code == 400

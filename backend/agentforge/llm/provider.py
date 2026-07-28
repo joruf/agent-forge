@@ -8,6 +8,7 @@ import litellm
 from agentforge.config import settings
 from agentforge.llm.cloud_providers import apply_cloud_credentials
 from agentforge.llm.litellm_compat import ensure_litellm_proxy_package
+from agentforge.llm.mock_provider import mock_complete
 
 ensure_litellm_proxy_package()
 from agentforge.llm.model_router import TaskType, model_router
@@ -39,6 +40,26 @@ class LLMProvider:
         updated = self.config.model_copy(update={"model": model})
         return LLMProvider(updated)
 
+    @staticmethod
+    def _is_ollama_model(model: str) -> bool:
+        """
+        Return True when a model string targets Ollama.
+
+        :param model: LiteLLM-style model string
+        :return: Whether the model is served by Ollama
+        """
+        return model.startswith("ollama/")
+
+    @staticmethod
+    def _is_mock_model(model: str) -> bool:
+        """
+        Return True when a model string targets the built-in mock provider.
+
+        :param model: LiteLLM-style model string
+        :return: Whether the model is the local test mock
+        """
+        return model.startswith("mock/")
+
     async def complete(
         self,
         messages: list[dict[str, str]],
@@ -57,10 +78,14 @@ class LLMProvider:
         :param max_tokens: Optional max output tokens override
         :return: Response dict with content and optional tool_calls
         """
+        resolved_model = model or self.config.model
+        if self._is_mock_model(resolved_model):
+            return mock_complete(messages, resolved_model)
+
         self._apply_env()
         request_timeout = timeout if timeout is not None else settings.llm_request_timeout
         kwargs: dict[str, Any] = {
-            "model": model or self.config.model,
+            "model": resolved_model,
             "messages": messages,
             "temperature": self.config.temperature,
             "max_tokens": max_tokens if max_tokens is not None else self.config.max_tokens,
@@ -69,6 +94,8 @@ class LLMProvider:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        if self._is_ollama_model(resolved_model):
+            kwargs["num_ctx"] = settings.ollama_num_ctx
 
         last_exc: Exception | None = None
         for attempt in range(2):
@@ -143,33 +170,72 @@ class LLMProvider:
         self,
         messages: list[dict[str, str]],
         model: str | None = None,
-    ) -> AsyncIterator[str]:
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
         """
-        Stream chat completion tokens.
+        Stream chat completion tokens, optionally with tool-calling.
 
         :param messages: OpenAI-style message list
         :param model: Optional model override for this request
-        :yield: Incremental text deltas from the model
+        :param tools: Optional tool definitions
+        :param max_tokens: Optional max output tokens override
+        :yield: ``{"type": "content", "text": str}`` per text delta, then a
+            final ``{"type": "tool_calls", "calls": [...]}``, or
+            ``{"type": "error", "message": str}`` on failure
         """
+        resolved_model = model or self.config.model
+        if self._is_mock_model(resolved_model):
+            result = mock_complete(messages, resolved_model)
+            yield {"type": "content", "text": result["content"]}
+            yield {"type": "tool_calls", "calls": result.get("tool_calls") or []}
+            return
+
         self._apply_env()
         kwargs: dict[str, Any] = {
-            "model": model or self.config.model,
+            "model": resolved_model,
             "messages": messages,
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": max_tokens if max_tokens is not None else self.config.max_tokens,
             "timeout": settings.llm_request_timeout,
             "stream": True,
         }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        if self._is_ollama_model(resolved_model):
+            kwargs["num_ctx"] = settings.ollama_num_ctx
 
+        chunks: list[Any] = []
         try:
             response = await litellm.acompletion(**kwargs)
             async for chunk in response:
+                chunks.append(chunk)
                 choice = chunk.choices[0]
                 delta = choice.delta.content if choice.delta else None
                 if delta:
-                    yield delta
+                    yield {"type": "content", "text": delta}
         except Exception as exc:
-            yield f"LLM error: {exc}"
+            yield {"type": "error", "message": self._format_llm_error(exc)}
+            return
+
+        tool_calls: list[dict[str, Any]] = []
+        if tools and chunks:
+            try:
+                built = litellm.stream_chunk_builder(chunks, messages=messages)
+                message = built.choices[0].message if built and built.choices else None
+                if message and getattr(message, "tool_calls", None):
+                    for call in message.tool_calls:
+                        tool_calls.append(
+                            {
+                                "id": call.id,
+                                "name": call.function.name,
+                                "arguments": call.function.arguments,
+                            }
+                        )
+            except Exception:
+                pass
+        yield {"type": "tool_calls", "calls": tool_calls}
 
     async def generate_title(self, user_message: str) -> str:
         """

@@ -48,6 +48,24 @@ def test_reviewer_multi_prompt_avoids_full_implementation() -> None:
     assert "Do not generate full HTML" in prompt
 
 
+def test_pm_final_synthesis_prompt_bounds_transcript() -> None:
+    """PM final synthesis only sees the transcript tail, not the full history."""
+    orchestrator = AgentOrchestrator()
+    pm = role_registry.get_role("project_manager")
+    assert pm is not None
+    max_rounds = orchestrator._resolve_multi_rounds()
+    long_transcript = [f"Developer: entry {i}" for i in range(30)]
+    prompt = orchestrator._build_multi_prompt(
+        pm,
+        max_rounds - 1,
+        "Baue eine Funktion",
+        long_transcript,
+    )
+    assert "Final synthesis requested." in prompt
+    assert "entry 29" in prompt
+    assert "entry 0" not in prompt
+
+
 def test_parallel_round_disabled_for_file_creation() -> None:
     """File creation requests run roles serially so specialists see tool results."""
     intent = detect_workspace_intent(

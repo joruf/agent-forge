@@ -33,6 +33,107 @@ def test_parse_content_tool_calls_ignores_plain_text() -> None:
     assert calls == []
 
 
+def test_parse_content_tool_calls_repairs_trailing_comma() -> None:
+    """A trailing comma from a weak model is repaired instead of dropped."""
+    content = '{"function": "remember", "arguments": {"key": "today", "value": "Sunday",}}'
+    calls = AgentOrchestrator._parse_content_tool_calls(content)
+    assert len(calls) == 1
+    assert calls[0]["name"] == "remember"
+
+
+def test_parse_content_tool_calls_repairs_truncated_json() -> None:
+    """Truncated JSON (missing closing braces) is repaired instead of dropped."""
+    content = '{"function": "remember", "arguments": {"key": "today", "value": "Sunday"'
+    calls = AgentOrchestrator._parse_content_tool_calls(content)
+    assert len(calls) == 1
+    assert calls[0]["name"] == "remember"
+
+
+def test_stream_llm_complete_suppresses_json_looking_content() -> None:
+    """A text-JSON tool call is never forwarded live as content_delta events."""
+    from types import SimpleNamespace
+
+    orchestrator = AgentOrchestrator()
+
+    class FakeLLM:
+        config = SimpleNamespace(model="ollama/fake")
+
+        async def complete_stream(self, messages, model=None, tools=None, max_tokens=None):
+            for piece in ['{"function"', ': "write_file"', ', "arguments": {}}']:
+                yield {"type": "content", "text": piece}
+            yield {"type": "tool_calls", "calls": []}
+
+    events: list[dict] = []
+
+    async def on_event(payload):
+        events.append(payload)
+
+    content, model_used, tool_calls, is_error = asyncio.run(
+        orchestrator._stream_llm_complete(
+            FakeLLM(), [{"role": "user", "content": "hi"}], on_event,
+        )
+    )
+
+    assert content == '{"function": "write_file", "arguments": {}}'
+    assert events == []
+    assert tool_calls == []
+    assert is_error is False
+    assert model_used == "ollama/fake"
+
+
+def test_stream_llm_complete_streams_normal_text_live() -> None:
+    """Ordinary prose is streamed live as content_delta events, unsuppressed."""
+    from types import SimpleNamespace
+
+    orchestrator = AgentOrchestrator()
+
+    class FakeLLM:
+        config = SimpleNamespace(model="ollama/fake")
+
+        async def complete_stream(self, messages, model=None, tools=None, max_tokens=None):
+            for piece in ["Hello ", "there, ", "how are you?"]:
+                yield {"type": "content", "text": piece}
+            yield {"type": "tool_calls", "calls": []}
+
+    events: list[dict] = []
+
+    async def on_event(payload):
+        events.append(payload)
+
+    content, model_used, tool_calls, is_error = asyncio.run(
+        orchestrator._stream_llm_complete(
+            FakeLLM(), [{"role": "user", "content": "hi"}], on_event,
+        )
+    )
+
+    assert content == "Hello there, how are you?"
+    assert "".join(event["content"] for event in events) == content
+    assert is_error is False
+
+
+def test_stream_llm_complete_surfaces_error() -> None:
+    """A streaming error event is surfaced as content text with is_error=True."""
+    from types import SimpleNamespace
+
+    orchestrator = AgentOrchestrator()
+
+    class FakeLLM:
+        config = SimpleNamespace(model="ollama/fake")
+
+        async def complete_stream(self, messages, model=None, tools=None, max_tokens=None):
+            yield {"type": "content", "text": "partial"}
+            yield {"type": "error", "message": "LLM error: boom"}
+
+    content, model_used, tool_calls, is_error = asyncio.run(
+        orchestrator._stream_llm_complete(
+            FakeLLM(), [{"role": "user", "content": "hi"}], None,
+        )
+    )
+
+    assert is_error is True
+    assert content == "LLM error: boom"
+
+
 def test_collect_interventions_appends_to_transcript() -> None:
     """Live user input is merged into the multi-agent transcript."""
     import asyncio

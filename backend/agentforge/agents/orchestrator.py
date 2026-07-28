@@ -149,6 +149,9 @@ class AgentOrchestrator(
     DOCS_TOOL_ROLES = frozenset({"documentation"})
     AUTO_ROLE = AUTO_ROLE
     DEFAULT_SINGLE_ROLE = "developer"
+    # Leading characters buffered in _stream_llm_complete before deciding whether a
+    # stream looks like a text-JSON tool call (which must not be shown to the user live).
+    STREAM_PEEK_CHAR_LIMIT = 8
     QUICK_SYSTEM_PROMPT = (
         "You are a helpful assistant. Reply naturally and concisely."
     )
@@ -916,22 +919,63 @@ class AgentOrchestrator(
         llm: LLMProvider,
         messages: list[dict],
         on_event: Callable | None,
-    ) -> tuple[str, str]:
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+    ) -> tuple[str, str, list[dict[str, Any]], bool]:
         """
         Stream an LLM completion and emit incremental content events.
+
+        Content deltas are withheld for a turn if the accumulated start of
+        the response looks like a JSON tool call in text form (some weaker
+        models emit tool calls as plain-text JSON instead of using the
+        native tool-calling channel) — showing that raw JSON live would be
+        confusing. Native tool calls never leak into ``content`` at all, so
+        this only affects that text-JSON fallback case.
 
         :param llm: Resolved LLM provider instance
         :param messages: Conversation messages for the model
         :param on_event: Optional WebSocket event callback
-        :return: Full assistant text and model identifier
+        :param tools: Optional tool definitions
+        :param max_tokens: Optional max output tokens override
+        :return: Full assistant text, model identifier, native tool calls, and
+            whether the stream ended in an error
         """
         parts: list[str] = []
-        async for delta in llm.complete_stream(messages):
+        tool_calls: list[dict[str, Any]] = []
+        is_error = False
+        peek_buffer = ""
+        decided = False
+        suppress = False
+
+        async for event in llm.complete_stream(messages, tools=tools, max_tokens=max_tokens):
             await self._ensure_not_cancelled()
+            event_type = event["type"]
+            if event_type == "tool_calls":
+                tool_calls = event["calls"]
+                continue
+            if event_type == "error":
+                parts = [event["message"]]
+                is_error = True
+                break
+
+            delta = event["text"]
             parts.append(delta)
-            if on_event:
+            if not decided:
+                peek_buffer += delta
+                stripped = peek_buffer.lstrip()
+                if len(stripped) >= self.STREAM_PEEK_CHAR_LIMIT or "\n" in peek_buffer:
+                    decided = True
+                    suppress = stripped[:1] in ("{", "[") or stripped.startswith("```")
+                    if not suppress and on_event:
+                        await on_event({
+                            "type": "content_delta",
+                            "content": peek_buffer,
+                        })
+                continue
+            if not suppress and on_event:
                 await on_event({
                     "type": "content_delta",
                     "content": delta,
                 })
-        return "".join(parts), llm.config.model
+
+        return "".join(parts), llm.config.model, tool_calls, is_error

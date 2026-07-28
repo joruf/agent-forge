@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -62,14 +63,11 @@ async def test_weak_retry_triggers_user_choice_not_plain_ask_user(
         {"role": "user", "content": prompt},
     ]
 
-    async def fake_complete(_messages, tools=None, max_tokens=None):
-        return {
-            "content": '{"status": "success"}',
-            "tool_calls": [],
-            "model": "test-model",
-        }
+    async def fake_complete_stream(_messages, model=None, tools=None, max_tokens=None):
+        yield {"type": "content", "text": '{"status": "success"}'}
+        yield {"type": "tool_calls", "calls": []}
 
-    monkeypatch.setattr(llm, "complete", fake_complete)
+    monkeypatch.setattr(llm, "complete_stream", fake_complete_stream)
 
     content, _routing = await orchestrator._run_agent_tool_loop(
         llm=llm,
@@ -92,6 +90,65 @@ async def test_weak_retry_triggers_user_choice_not_plain_ask_user(
     assert captured
     assert captured[0] == ClarificationKind.AGENT_BLOCKED
     assert content == clarification_pending_marker()
+
+
+@pytest.mark.asyncio
+async def test_run_agent_tool_loop_executes_streamed_native_tool_call(
+    monkeypatch: pytest.MonkeyPatch,
+    temp_workspace: Path,
+) -> None:
+    """A native tool call reconstructed from a stream is executed just like a non-streaming one."""
+    from agentforge.config import settings
+
+    monkeypatch.setattr(settings, "workspace_root", temp_workspace)
+    prompt = "Create GitHub/demo.txt with hello content"
+    intent = detect_workspace_intent(prompt)
+    task_state = build_task_state(prompt, intent)
+
+    orchestrator = AgentOrchestrator()
+    llm, routing = await orchestrator._resolve_llm(prompt, role_id="developer", mode_single=True)
+    tools = orchestrator._build_tools("tool-loop-stream-test", "chat")
+    agent_tools = orchestrator._tools_for_role("developer", "tool-loop-stream-test", "chat", tools)
+    messages = [
+        {"role": "system", "content": "test"},
+        {"role": "user", "content": prompt},
+    ]
+
+    async def fake_complete_stream(_messages, model=None, tools=None, max_tokens=None):
+        yield {
+            "type": "tool_calls",
+            "calls": [
+                {
+                    "id": "call_1",
+                    "name": "write_file",
+                    "arguments": json.dumps({"path": "GitHub/demo.txt", "content": "hello"}),
+                }
+            ],
+        }
+
+    monkeypatch.setattr(llm, "complete_stream", fake_complete_stream)
+
+    await orchestrator._run_agent_tool_loop(
+        llm=llm,
+        routing=routing,
+        chat_id="tool-loop-stream-test",
+        agent_id="developer",
+        agent_name="Developer",
+        role_id="developer",
+        user_content=prompt,
+        mode_single=True,
+        mode_multi=False,
+        messages=messages,
+        tools=agent_tools,
+        memory_scope="chat",
+        on_event=None,
+        workspace_intent=intent,
+        task_state=task_state,
+    )
+
+    written = temp_workspace / "GitHub" / "demo.txt"
+    assert written.is_file()
+    assert written.read_text(encoding="utf-8") == "hello"
 
 
 @pytest.mark.asyncio

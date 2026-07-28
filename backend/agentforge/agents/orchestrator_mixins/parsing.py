@@ -7,6 +7,8 @@ import re
 import uuid
 from typing import Any
 
+from agentforge.utils.json_repair import repair_json
+
 
 class ParsingMixin:
     """Mixin for AgentOrchestrator parsing."""
@@ -224,7 +226,10 @@ class ParsingMixin:
             try:
                 payload = json.loads(candidate)
             except json.JSONDecodeError:
-                continue
+                try:
+                    payload = json.loads(repair_json(candidate))
+                except json.JSONDecodeError:
+                    continue
             for call in cls._extract_tool_calls_from_payload(payload):
                 key = (call["name"], call["arguments"])
                 if key in seen:

@@ -574,3 +574,57 @@ async def test_multi_agent_repetition_stall_stops_endless_discussion(
         if discussion.from_agent == "Reviewer"
     ]
     assert len(reviewer_posts) <= 1
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_reviewer_fail_triggers_developer_fix_retry(
+    monkeypatch,
+    temp_workspace: Path,
+) -> None:
+    """A failing reviewer verdict triggers one bounded developer fix-and-reverify cycle."""
+    (temp_workspace / "GitHub").mkdir()
+    prompt = (
+        f"Erstelle index.php mit Header und Footer und speichere unter {temp_workspace}/GitHub/Test"
+    )
+
+    capture: dict[str, list[dict]] = {}
+    result = await run_orchestration(
+        monkeypatch,
+        temp_workspace,
+        prompt,
+        role_ids=["developer", "reviewer", "project_manager"],
+        agent_loop=make_team_loop(
+            role_responses={
+                "developer": [
+                    "Created index.php with header and content.",
+                    "Added the missing footer to index.php.",
+                ],
+                "reviewer": [
+                    "VERDICT: fail\nREASON: Missing footer markup.\nNOTES: Add a footer tag.",
+                    "VERDICT: pass\nREASON: Footer added.\nNOTES: Looks good.",
+                ],
+            },
+            capture=capture,
+        ),
+    )
+
+    assert result.messages
+
+    reviewer_posts = [
+        discussion
+        for discussion in result.agent_discussions
+        if discussion.from_agent == "Reviewer"
+    ]
+    assert len(reviewer_posts) == 2
+    assert reviewer_posts[0].content.startswith("VERDICT: fail")
+    assert reviewer_posts[1].content.startswith("VERDICT: pass")
+
+    # The fix turn runs through the normal agent loop (unlike the initial
+    # deterministic materialization pass), so it shows up in the capture.
+    developer_fix_calls = capture.get("developer", [])
+    assert len(developer_fix_calls) >= 1
+    assert any(
+        "found blocking issues" in message.get("content", "")
+        for call in developer_fix_calls
+        for message in call
+    )

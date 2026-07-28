@@ -379,6 +379,7 @@ export default function App() {
             );
           }}
           onChatRunStateChange={handleChatRunStateChange}
+          onRolesChanged={setRoles}
         />
       </div>
       <SettingsModal

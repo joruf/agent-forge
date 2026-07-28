@@ -580,8 +580,8 @@ async def create_role(data: RoleCreate) -> AgentRole:
 
 @router.put("/roles/{role_id}")
 async def update_role(role_id: str, data: RoleUpdate) -> AgentRole:
-    """Update a custom agent role."""
-    role = AgentRole(**data.model_dump(), id=role_id, is_builtin=False)
+    """Update an agent role (built-in or custom)."""
+    role = AgentRole(**data.model_dump(), id=role_id)
     try:
         return role_registry.update_role(role_id, role)
     except KeyError as exc:

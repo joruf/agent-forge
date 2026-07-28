@@ -50,9 +50,9 @@
   },
   "roles": {
     "developer": { "name": "Entwickler", "description": "Schreibt, bearbeitet und refaktoriert Code im Arbeitsverzeichnis." },
-    "reviewer": { "name": "Reviewer", "description": "Prüft Codequalität, Bugs und Best Practices." },
-    "architect": { "name": "Architekt", "description": "Plant Systemstruktur, Module und Schnittstellen." },
-    "researcher": { "name": "Rechercheur", "description": "Recherchiert Themen und fasst Erkenntnisse zusammen." },
+    "reviewer": { "name": "Reviewer", "description": "Prüft Codequalität, Bugs und Best Practices — anhand geteilter Diffs/Ausschnitte in Team-Diskussionen, oder durch direktes Lesen von Dateien im Einzelmodus." },
+    "architect": { "name": "Architekt", "description": "Plant Systemstruktur, Module und Schnittstellen; sichtet den Code, überlässt die vollständige Umsetzung aber der Developer-Rolle." },
+    "researcher": { "name": "Rechercheur", "description": "Recherchiert externe Themen per Websuche und Gedächtnis; hat keinen Dateizugriff und kann diesen Code nicht direkt einsehen." },
     "documentation": { "name": "Dokumentation", "description": "Erstellt und pflegt Dokumentation und technische Texte." },
     "project_manager": { "name": "Projektleiter", "description": "Koordiniert Agenten, bindet den Nutzer ein und liefert Ergebnisse." },
     "software_tester": { "name": "Software-Tester", "description": "Entwirft Testfälle, führt Tests aus und meldet Qualitätsprobleme." },
@@ -96,13 +96,15 @@
     "litellm_inference_fail": "Aktives Modell {{model}} schlägt über LiteLLM fehl: {{error}}",
     "readiness_ok": "Modelle sind chatbereit",
     "readiness_fail": "Modelle sind nicht chatbereit",
+    "mock_model_ok": "Verwendet Mock-Modell {{model}} — kein echtes LLM erforderlich",
     "labels": {
       "default_model": "Standard-Modell",
       "registry_ollama": "Registry vs Ollama",
       "cloud_inference": "Cloud-Inferenz",
       "litellm_import": "LiteLLM-Stack",
       "litellm_inference": "LiteLLM-Inferenz",
-      "active_model": "Aktives Modell"
+      "active_model": "Aktives Modell",
+      "mock_model": "Mock-Modell"
     }
   }
 }

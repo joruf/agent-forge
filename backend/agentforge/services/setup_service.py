@@ -162,10 +162,32 @@ async def run_readiness_check(
     :return: Aggregated readiness report
     """
     model_ref = active_model_ref(default_model)
+
+    if model_ref.startswith("mock/"):
+        results: list[dict[str, Any]] = [
+            test_litellm_import(),
+            {
+                "id": "mock_model",
+                "label": t("settings_test.labels.mock_model"),
+                "ok": True,
+                "message": t("settings_test.mock_model_ok", model=model_ref),
+            },
+        ]
+        blocking = _blocking_readiness_result(results)
+        chat_ready = blocking is None
+        return {
+            "chat_ready": chat_ready,
+            "active_model": model_ref,
+            "results": results,
+            "summary": t("settings_test.readiness_ok") if chat_ready else t("settings_test.readiness_fail"),
+            "blocking_message": blocking.get("message") if blocking else None,
+            "blocking_id": blocking.get("id") if blocking else None,
+        }
+
     provider = detect_provider_from_model(model_ref)
     base = (ollama_url or settings.ollama_base_url).rstrip("/")
 
-    results: list[dict[str, Any]] = [test_litellm_import()]
+    results = [test_litellm_import()]
 
     if provider is None:
         ollama_result = await test_ollama(base)

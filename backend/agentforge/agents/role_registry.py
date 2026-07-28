@@ -23,29 +23,48 @@ BUILTIN_ROLES: list[AgentRole] = [
     AgentRole(
         id="reviewer",
         name="Reviewer",
-        description="Reviews code quality, bugs, and best practices.",
+        description=(
+            "Reviews code quality, bugs, and best practices — from shared diffs/snippets in "
+            "team discussions, or by reading files directly when working alone."
+        ),
         system_prompt=(
-            "You are a senior code reviewer. You analyze code for bugs, security issues, "
-            "performance problems, and style violations. Provide actionable feedback with "
-            "specific suggestions."
+            "You are a senior code reviewer. In a team discussion you usually review the diffs, "
+            "snippets, and summaries other agents have already shared in the conversation rather "
+            "than exploring the repository yourself — ask for the relevant code if it's missing. "
+            "When working alone, you have full read access and should open the actual files. "
+            "Analyze code for bugs, security issues, performance problems, and style violations, "
+            "and give actionable, specific feedback."
         ),
     ),
     AgentRole(
         id="architect",
         name="Architect",
-        description="Plans system structure, modules, and interfaces.",
+        description=(
+            "Plans system structure, modules, and interfaces; inspects the codebase but leaves "
+            "full feature implementation to the developer role."
+        ),
         system_prompt=(
             "You are a software architect. You design scalable structures, define module "
-            "boundaries, choose appropriate patterns, and document architectural decisions."
+            "boundaries, choose appropriate patterns, and document architectural decisions. "
+            "You have the same file and shell access as a developer, but use it mainly to "
+            "inspect the existing codebase and write design docs or interface stubs — leave "
+            "full feature implementation to the developer role to avoid duplicated work, unless "
+            "no developer is involved in the task."
         ),
     ),
     AgentRole(
         id="researcher",
         name="Researcher",
-        description="Researches topics and summarizes findings.",
+        description=(
+            "Researches external topics via web search and memory; has no file access, so "
+            "cannot inspect this codebase directly."
+        ),
         system_prompt=(
-            "You are a technical researcher. You gather information, compare approaches, "
-            "and produce clear summaries with sources when available."
+            "You are a technical researcher. You have web search and long-term memory, but no "
+            "file or shell tools — you cannot open files in this workspace. Gather information, "
+            "compare approaches, cite sources when available, and produce clear summaries. If a "
+            "question requires inspecting this project's actual code, say so explicitly and "
+            "defer to the developer or architect role instead of guessing."
         ),
     ),
     AgentRole(
@@ -106,13 +125,20 @@ class RoleRegistry:
     def __init__(self, roles_dir: Path | None = None) -> None:
         """Load built-in roles and optional custom role files."""
         self._roles: dict[str, AgentRole] = {r.id: r for r in BUILTIN_ROLES}
+        self._overridden_ids: set[str] = set()
         self.roles_dir = roles_dir or settings.roles_dir
         self._load_custom_roles()
 
     def _load_custom_roles(self) -> None:
-        """Load YAML/JSON role files from assets directory."""
+        """Load YAML/JSON role files from assets directory.
+
+        A file whose ``id`` matches a built-in role is treated as a persisted
+        edit of that built-in role (keeps ``is_builtin=True``) rather than a
+        new custom role.
+        """
         if not self.roles_dir.exists():
             return
+        builtin_ids = {r.id for r in BUILTIN_ROLES}
         for path in self.roles_dir.glob("*"):
             if path.suffix not in (".yaml", ".yml", ".json"):
                 continue
@@ -124,8 +150,11 @@ class RoleRegistry:
                 else:
                     items = [data]
                 for item in items:
-                    role = AgentRole(**item, is_builtin=False)
+                    item = dict(item)
+                    item.pop("is_builtin", None)
+                    role = AgentRole(**item, is_builtin=item.get("id") in builtin_ids)
                     self._roles[role.id] = role
+                    self._overridden_ids.add(role.id)
             except Exception:
                 continue
 
@@ -134,11 +163,16 @@ class RoleRegistry:
         return list(self._roles.values())
 
     def list_roles_localized(self, locale: str | None = None) -> list[AgentRole]:
-        """Return roles with localized names for built-in roles."""
+        """Return roles with localized names for untouched built-in roles.
+
+        Built-in roles the user has edited (persisted to ``roles_dir``) keep
+        their saved name/description as-is instead of falling back to the
+        translation catalog.
+        """
         lang = locale or current_locale()
         localized: list[AgentRole] = []
         for role in self.list_roles():
-            if role.is_builtin:
+            if role.is_builtin and role.id not in self._overridden_ids:
                 localized.append(
                     role.model_copy(
                         update={
@@ -177,15 +211,19 @@ class RoleRegistry:
         return role
 
     def update_role(self, role_id: str, role: AgentRole) -> AgentRole:
-        """Update an existing custom role and persist to disk."""
+        """Update an existing role (built-in or custom) and persist to disk.
+
+        Built-in roles keep ``is_builtin=True`` so they remain protected from
+        deletion, but their name/description/system prompt can be edited and
+        the edit is persisted as an override in ``roles_dir``.
+        """
         existing = self._roles.get(role_id)
         if not existing:
             raise KeyError(role_id)
-        if existing.is_builtin:
-            raise ValueError("Built-in roles cannot be modified")
         role.id = role_id
-        role.is_builtin = False
+        role.is_builtin = existing.is_builtin
         self._roles[role_id] = role
+        self._overridden_ids.add(role_id)
         self._persist_role(role)
         return role
 

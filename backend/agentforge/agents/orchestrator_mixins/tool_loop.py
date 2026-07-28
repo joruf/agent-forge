@@ -215,7 +215,7 @@ class ToolLoopMixin:
                     on_event,
                 )
                 if not tool_schemas:
-                    content, model_used = await self._stream_llm_complete(
+                    content, model_used, _tool_calls, _is_error = await self._stream_llm_complete(
                         llm,
                         messages,
                         on_event,
@@ -223,11 +223,21 @@ class ToolLoopMixin:
                     routing["model"] = model_used
                     return self._finalize_agent_content(content, tool_summaries), routing
 
-                result = await llm.complete(
-                    messages,
-                    tools=tool_schemas,
-                    max_tokens=512 if mode_multi and role_id != "developer" else None,
+                stream_content, stream_model, stream_tool_calls, stream_error = (
+                    await self._stream_llm_complete(
+                        llm,
+                        messages,
+                        on_event,
+                        tools=tool_schemas,
+                        max_tokens=512 if mode_multi and role_id != "developer" else None,
+                    )
                 )
+                result = {
+                    "content": stream_content,
+                    "tool_calls": stream_tool_calls,
+                    "model": stream_model,
+                    "error": stream_error,
+                }
                 if result.get("error"):
                     routing["model"] = result.get("model", routing.get("model"))
                     return (

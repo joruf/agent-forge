@@ -102,6 +102,24 @@ async def test_resolve_local_override(router: ModelRouter, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_non_ollama_override_skips_installed_lookup(router: ModelRouter, monkeypatch) -> None:
+    """Mock/cloud overrides bypass the Ollama installed-models probe entirely."""
+    monkeypatch.setattr(
+        "agentforge.llm.model_router.settings.override_model",
+        "mock/mock-1",
+    )
+
+    async def fail_if_called(force_refresh: bool = False) -> list[str]:
+        raise AssertionError("list_installed_models should not be called for non-ollama overrides")
+
+    monkeypatch.setattr(router, "list_installed_models", fail_if_called)
+
+    result = await router.resolve(TaskType.CODING)
+    assert result["model"] == "mock/mock-1"
+    assert result["source"] == "local_override"
+
+
+@pytest.mark.asyncio
 async def test_resolve_respects_disabled_auto_routing(router: ModelRouter, monkeypatch) -> None:
     """When auto routing is off, fallback model is returned."""
     monkeypatch.setattr("agentforge.llm.model_router.settings.override_model", "")

@@ -74,20 +74,31 @@ def test_add_update_delete_custom_role(tmp_path) -> None:
     assert not (tmp_path / "roles" / "custom_analyst.yaml").exists()
 
 
-def test_cannot_modify_builtin_role(tmp_path) -> None:
-    """Built-in roles reject update and delete."""
+def test_can_update_but_not_delete_builtin_role(tmp_path) -> None:
+    """Built-in roles can be edited and the edit persists, but cannot be deleted."""
     registry = RoleRegistry(roles_dir=tmp_path / "roles")
-    with pytest.raises(ValueError, match="Built-in"):
-        registry.update_role(
-            "developer",
-            AgentRole(
-                id="developer",
-                name="Dev",
-                description="x",
-                system_prompt="y",
-                is_builtin=False,
-            ),
-        )
+    updated = registry.update_role(
+        "developer",
+        AgentRole(
+            id="developer",
+            name="Dev",
+            description="x",
+            system_prompt="y",
+            is_builtin=False,
+        ),
+    )
+    assert updated.is_builtin is True
+    assert updated.name == "Dev"
+    assert (tmp_path / "roles" / "developer.yaml").exists()
+
+    reloaded = RoleRegistry(roles_dir=tmp_path / "roles")
+    reloaded_role = reloaded.get_role("developer")
+    assert reloaded_role is not None
+    assert reloaded_role.is_builtin is True
+    assert reloaded_role.name == "Dev"
+    localized = reloaded.list_roles_localized("de")
+    assert next(role for role in localized if role.id == "developer").name == "Dev"
+
     with pytest.raises(ValueError, match="Built-in"):
         registry.delete_role("developer")
 

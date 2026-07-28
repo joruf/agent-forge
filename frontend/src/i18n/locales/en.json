@@ -70,6 +70,16 @@
     "autoRole": "Auto",
     "autoRoleDescription": "Detects the topic and switches to the best matching agent automatically.",
     "selectRole": "Role",
+    "roleContextMenu": {
+      "viewEdit": "View / edit role"
+    },
+    "roleDetailsDialog": {
+      "title": "Role details",
+      "builtinBadge": "Built-in",
+      "customBadge": "Custom",
+      "builtinNote": "This is a built-in role used by the agent team. You can adjust its description and instructions — changes are saved and used for this role going forward.",
+      "roleId": "Role ID"
+    },
     "executionStrategy": "Execution",
     "executionStrategyAuto": "Auto",
     "executionStrategySerial": "Serial",
