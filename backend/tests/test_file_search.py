@@ -145,6 +145,21 @@ def test_apply_file_edit_by_line_range(temp_workspace) -> None:
     assert "Updated" in message
 
 
+def test_edit_file_schema_recommends_old_string_first() -> None:
+    """The schema steers weak models toward old_string as the default strategy."""
+    schema = EditFileTool().schema()
+    params = schema["function"]["parameters"]
+
+    assert "old_string" in schema["function"]["description"]
+    assert "RECOMMENDED" in params["properties"]["old_string"]["description"]
+    for advanced_field in ("match_id", "start_line", "start_column", "end_line", "end_column"):
+        assert "Advanced" in params["properties"][advanced_field]["description"]
+
+    ordered_fields = list(params["properties"].keys())
+    assert ordered_fields.index("old_string") < ordered_fields.index("match_id")
+    assert ordered_fields.index("old_string") < ordered_fields.index("start_line")
+
+
 def test_format_search_results_registers_anchors() -> None:
     """Search formatting stores anchors for later edits."""
     from agentforge.tools.file_search import FileMatch

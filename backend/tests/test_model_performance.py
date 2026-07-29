@@ -7,6 +7,7 @@ import pytest
 from agentforge.config import settings
 from agentforge.services.model_performance_service import (
     build_performance_report,
+    claim_startup_benchmark,
     record_runtime_performance,
 )
 from agentforge.storage.performance_store import PerformanceStore
@@ -55,6 +56,37 @@ def test_performance_store_blends_runtime_samples(performance_store: Performance
     assert entry["sample_count"] >= 2
     assert entry["source"] == "runtime"
     assert entry["tokens_per_second"] is not None
+
+
+def test_performance_store_keeps_bounded_recent_sample_history(
+    performance_store: PerformanceStore,
+) -> None:
+    """Only the last MAX_RECENT_SAMPLES throughput samples are kept, most-recent last."""
+    from agentforge.storage.performance_store import MAX_RECENT_SAMPLES
+
+    for value in range(1, MAX_RECENT_SAMPLES + 3):
+        performance_store.record(
+            "ollama/llama3.1:8b",
+            accessible=True,
+            tokens_per_second=float(value),
+            source="benchmark",
+        )
+
+    entry = performance_store.get_model("ollama/llama3.1:8b")
+    assert entry is not None
+    samples = entry["recent_samples"]
+    assert len(samples) == MAX_RECENT_SAMPLES
+    assert [s["tokens_per_second"] for s in samples] == [3.0, 4.0, 5.0, 6.0, 7.0]
+
+
+def test_claim_startup_benchmark_only_once(monkeypatch) -> None:
+    """Only the first caller this process lifetime claims the startup benchmark."""
+    monkeypatch.setattr(
+        "agentforge.services.model_performance_service._startup_benchmark_triggered", False,
+    )
+    assert claim_startup_benchmark() is True
+    assert claim_startup_benchmark() is False
+    assert claim_startup_benchmark() is False
 
 
 def test_record_runtime_performance_ignores_empty_output(

@@ -35,6 +35,7 @@ from agentforge.context import context_registry
 from agentforge.context.catalog import catalog_as_dict
 from agentforge.services.model_performance_service import (
     benchmark_all_models,
+    claim_startup_benchmark,
     get_performance_report,
     stream_benchmark_all_models,
 )
@@ -276,6 +277,20 @@ async def model_performance_benchmark_stream() -> StreamingResponse:
         stream_benchmark_all_models(),
         media_type="application/x-ndjson",
     )
+
+
+@router.post("/llm/performance/benchmark/startup")
+async def model_performance_benchmark_startup() -> dict[str, Any]:
+    """
+    Run the once-per-backend-process startup benchmark, if not already claimed.
+
+    Every open frontend tab calls this on load; only the first one actually
+    triggers a benchmark run, so multiple tabs never duplicate the work.
+    """
+    if not claim_startup_benchmark():
+        return {"started": False}
+    await benchmark_all_models()
+    return {"started": True}
 
 
 @router.get("/context/catalog")

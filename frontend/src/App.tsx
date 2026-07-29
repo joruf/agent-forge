@@ -148,7 +148,7 @@ export default function App() {
       return;
     }
     benchmarkStartedRef.current = true;
-    void api.runModelPerformanceBenchmark().catch(() => undefined);
+    void api.runStartupModelPerformanceBenchmark().catch(() => undefined);
   }, [backendOnline, settings?.benchmark_at_startup, readiness?.chat_ready]);
 
   useEffect(() => {

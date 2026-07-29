@@ -4,12 +4,21 @@ import pytest
 
 from agentforge.llm.task_types import TaskType
 from agentforge.storage.model_store import ModelStore
+from agentforge.storage.performance_store import PerformanceStore
 
 
 @pytest.fixture
 def store(temp_data_dir) -> ModelStore:
     """Isolated model store instance."""
     return ModelStore(temp_data_dir / "model_config.json")
+
+
+@pytest.fixture
+def performance(temp_data_dir, monkeypatch) -> PerformanceStore:
+    """Isolated performance store, patched in place of the model_store module's singleton."""
+    instance = PerformanceStore(temp_data_dir / "model_performance.json")
+    monkeypatch.setattr("agentforge.storage.model_store.performance_store", instance)
+    return instance
 
 
 def test_add_and_list_models(store: ModelStore) -> None:
@@ -59,6 +68,68 @@ def test_resolve_model_for_task_uses_assignment(store: ModelStore) -> None:
     )
     assert litellm == "ollama/coder:7b"
     assert info["model_id"] == model["id"]
+    assert "ranked_by_performance" not in info
+
+
+def test_resolve_model_for_task_prefers_faster_measured_model(
+    store: ModelStore, performance: PerformanceStore,
+) -> None:
+    """Among several models assigned to a task, the faster measured one wins."""
+    slow = store.add_model("slow-coder:7b", assigned_tasks=["coding"], auto_suggest=False)
+    fast = store.add_model("fast-coder:7b", assigned_tasks=["coding"], auto_suggest=False)
+    performance.record(
+        "ollama/slow-coder:7b", accessible=True, tokens_per_second=5.0, source="benchmark",
+    )
+    performance.record(
+        "ollama/fast-coder:7b", accessible=True, tokens_per_second=40.0, source="benchmark",
+    )
+
+    litellm, info = store.resolve_model_for_task(
+        TaskType.CODING,
+        installed_tags=["slow-coder:7b", "fast-coder:7b"],
+        fallback_model="ollama/fallback",
+    )
+
+    assert litellm == "ollama/fast-coder:7b"
+    assert info["model_id"] == fast["id"]
+    assert info["ranked_by_performance"] is True
+    assert slow["id"] != fast["id"]
+
+
+def test_resolve_model_for_task_skips_known_inaccessible_model(
+    store: ModelStore, performance: PerformanceStore,
+) -> None:
+    """A model measured as inaccessible loses to an unmeasured one despite list order."""
+    broken = store.add_model("broken:7b", assigned_tasks=["coding"], auto_suggest=False)
+    store.add_model("untested:7b", assigned_tasks=["coding"], auto_suggest=False)
+    performance.record("ollama/broken:7b", accessible=False, source="benchmark", error="timeout")
+
+    litellm, info = store.resolve_model_for_task(
+        TaskType.CODING,
+        installed_tags=["broken:7b", "untested:7b"],
+        fallback_model="ollama/fallback",
+    )
+
+    assert litellm == "ollama/untested:7b"
+    assert info["model_id"] != broken["id"]
+
+
+def test_resolve_model_for_task_unranked_without_performance_data(
+    store: ModelStore, performance: PerformanceStore,
+) -> None:
+    """With no performance data at all, behavior matches the pre-ranking order."""
+    first = store.add_model("first:7b", assigned_tasks=["coding"], auto_suggest=False)
+    store.add_model("second:7b", assigned_tasks=["coding"], auto_suggest=False)
+
+    litellm, info = store.resolve_model_for_task(
+        TaskType.CODING,
+        installed_tags=["first:7b", "second:7b"],
+        fallback_model="ollama/fallback",
+    )
+
+    assert litellm == "ollama/first:7b"
+    assert info["model_id"] == first["id"]
+    assert info["ranked_by_performance"] is True
 
 
 def test_sync_from_ollama_adds_new_tags(store: ModelStore) -> None:

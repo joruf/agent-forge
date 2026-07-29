@@ -59,8 +59,11 @@ AgentForge is a local-first AI assistant that can read and write files in your w
 - **Human-in-the-loop** — shell command whitelist + approval dialog for everything else
 - **Expandable agent history** — truncated messages expand on click
 - **Configurable memory** — per-chat token budget (100 – 128 000 tokens), configured in Properties
-- **LLM auto-routing** — task-type based model selection (coding, SQL, research, …)
+- **LLM auto-routing** — task-type based model selection (coding, SQL, research, …), aware of each model's measured performance when several are assigned to the same task
 - **Multi-provider support** — Ollama (local/remote) + OpenAI, Claude, Gemini, Groq, Mistral via LiteLLM
+- **Model performance monitor** — tracks per-model accessibility and tokens/sec automatically during use, plus an on-demand benchmark for every configured model
+- **Editable agent roles** — right-click any role chip to view/edit its description and system prompt, including the built-in roles
+- **Execute-verify-fix loop** — a failing reviewer/tester verdict automatically triggers one bounded developer fix-and-recheck cycle before the result reaches you
 - **Setup wizard** — guided first-run checks for Ollama, models, workspace, API keys
 - **Pre-LLM pipeline** — prompt normalizer, workspace agenda, and path resolver improve reliability with local Ollama models
 - **Persistent chats** — SQLite storage with auto-generated titles
@@ -81,7 +84,9 @@ AgentForge is a local-first AI assistant that can read and write files in your w
 | Security Engineer | Security review and vulnerability mitigation |
 | DevOps Engineer | CI/CD, deployment scripts, infrastructure automation |
 
-Custom roles can be added as YAML files in `assets/roles/`.
+Right-click a role chip in the chat header to view or edit its description and system prompt — this
+works for built-in roles too (edits persist as YAML overrides in `assets/roles/`), not just custom
+roles added directly as YAML files there.
 
 ---
 
@@ -423,10 +428,13 @@ AGENTFORGE_UI_LANGUAGE=en
 | `AGENTFORGE_HOST` | Backend bind address (default: `127.0.0.1`) |
 | `AGENTFORGE_PORT` | Backend port (default: `8765`) |
 | `AGENTFORGE_OLLAMA_BASE_URL` | URL of your Ollama server |
+| `AGENTFORGE_OLLAMA_NUM_CTX` | Ollama context window in tokens (default: `8192`; Ollama itself defaults to `2048` if unset, which silently truncates prompts — raise for models/hardware that support more context) |
+| `AGENTFORGE_OLLAMA_KEEP_ALIVE` | How long Ollama keeps a model loaded after the last request (default: `30m`; Ollama's own default is `5m`, after which the next request pays a full reload — `-1` keeps it loaded indefinitely, `0` unloads immediately) |
 | `AGENTFORGE_DEFAULT_MODEL` | Fallback LiteLLM model string |
-| `AGENTFORGE_OVERRIDE_MODEL` | Force one model for **all** tasks (Quick Chat, single/multi-agent, titles). Leave empty for normal task-based routing |
+| `AGENTFORGE_OVERRIDE_MODEL` | Force one model for **all** tasks (Quick Chat, single/multi-agent, titles). Leave empty for normal task-based routing. Set to `mock/mock-1` to run the whole app against a built-in deterministic mock instead of a real LLM (useful for UI/dev testing without Ollama or a cloud key) |
 | `AGENTFORGE_WORKSPACE_ROOT` | Root directory for file/shell tools |
-| `AGENTFORGE_LLM_AUTO_ROUTING` | Auto-select model by task type (`true`/`false`) |
+| `AGENTFORGE_LLM_AUTO_ROUTING` | Auto-select model by task type (`true`/`false`); factors in each model's measured accessibility/throughput from the Performance modal when multiple models are assigned to the same task |
+| `AGENTFORGE_BENCHMARK_AT_STARTUP` | Automatically run a full model benchmark once on app load (`true`/`false`, default: `false`) |
 | `AGENTFORGE_LLM_REQUEST_TIMEOUT` | LLM request timeout in seconds (default: `300`; increase for remote or CPU-only Ollama) |
 | `AGENTFORGE_LLM_TITLE_TIMEOUT` | Timeout for AI chat title generation in seconds (default: `45`) |
 | `AGENTFORGE_MULTI_AGENT_MAX_ROUNDS` | Discussion rounds in multi-agent mode with cloud models (default: `4`) |
@@ -595,6 +603,9 @@ is_builtin: false
 
 Restart the backend or reload roles via the API after adding files.
 
+To edit an **existing** role (built-in or custom) instead, right-click its chip in the chat header —
+no YAML editing or restart needed, changes apply immediately.
+
 ---
 
 ## Command security
@@ -704,7 +715,12 @@ cd frontend && npm run tauri:build
 
 ## Roadmap (Phase 2+)
 
-Shipped in current releases: web search tool, custom role editor in Settings → Agents, PDF/Word document read/write with auto-install of dependencies, unified user-choice clarification dialogs for workflow blockers, **Grill Mode** (Idea → Clarify → Plan → Execute).
+Shipped in current releases: web search tool, custom role editor in Settings → Agents plus in-chat
+role editing via right-click, PDF/Word document read/write with auto-install of dependencies,
+unified user-choice clarification dialogs for workflow blockers, **Grill Mode** (Idea → Clarify →
+Plan → Execute → Test), an execute-verify-fix loop for failing reviewer/tester verdicts, per-model
+performance monitoring feeding back into auto-routing, and a built-in mock LLM provider for
+testing without a real model.
 
 - REST API integrations beyond web search
 - Plugin system for external tools

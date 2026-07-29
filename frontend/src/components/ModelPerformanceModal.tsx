@@ -1,8 +1,55 @@
-import type { ModelPerformanceProgress, ModelPerformanceReport } from "../types";
+import type { ModelPerformanceProgress, ModelPerformanceReport, ModelPerformanceSample } from "../types";
 import { useI18n } from "../hooks/useI18n";
 import { useEscapeClose } from "../hooks/useEscapeClose";
 import { useResizableModalSize } from "../hooks/useResizableModalSize";
 import { formatMessageTimestamp } from "../utils/formatMessageTimestamp";
+
+const SPARKLINE_WIDTH = 60;
+const SPARKLINE_HEIGHT = 20;
+
+/**
+ * Render a tiny inline trend line for recent throughput samples.
+ *
+ * @param samples Recent tokens/sec samples, oldest first
+ * @returns A small SVG sparkline, or null when there's not enough history
+ */
+function PerformanceSparkline({ samples }: { samples: ModelPerformanceSample[] }) {
+  if (samples.length < 2) {
+    return null;
+  }
+  const values = samples.map((sample) => sample.tokens_per_second);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const step = SPARKLINE_WIDTH / (values.length - 1);
+  const toY = (value: number) => SPARKLINE_HEIGHT - ((value - min) / range) * SPARKLINE_HEIGHT;
+  const points = values.map((value, index) => `${(index * step).toFixed(1)},${toY(value).toFixed(1)}`).join(" ");
+  const lastX = (values.length - 1) * step;
+  const lastY = toY(values[values.length - 1]);
+  const tooltip = values.map((value) => value.toFixed(1)).join(" → ");
+
+  return (
+    <svg
+      className="model-performance-sparkline"
+      viewBox={`0 0 ${SPARKLINE_WIDTH} ${SPARKLINE_HEIGHT}`}
+      width={SPARKLINE_WIDTH}
+      height={SPARKLINE_HEIGHT}
+      role="img"
+      aria-label={tooltip}
+    >
+      <title>{tooltip}</title>
+      <polyline
+        points={points}
+        fill="none"
+        stroke="var(--text-muted)"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      <circle cx={lastX} cy={lastY} r="2" fill="var(--accent)" />
+    </svg>
+  );
+}
 
 interface ModelPerformanceModalProps {
   open: boolean;
@@ -148,7 +195,12 @@ export function ModelPerformanceModal({
                             : t("modelPerformance.accessibleNo")}
                         </span>
                       </td>
-                      <td>{formatTokensPerSecond(entry.tokens_per_second)}</td>
+                      <td>
+                        <div className="model-performance-speed-cell">
+                          <span>{formatTokensPerSecond(entry.tokens_per_second)}</span>
+                          <PerformanceSparkline samples={entry.recent_samples ?? []} />
+                        </div>
+                      </td>
                       <td>{formatSourceLabel(entry.source, t)}</td>
                       <td>
                         {entry.last_measured_at

@@ -12,6 +12,7 @@ from agentforge.config import settings
 from agentforge.i18n import current_locale
 from agentforge.llm.model_catalog import model_catalog
 from agentforge.llm.task_types import TaskType
+from agentforge.storage.performance_store import performance_store
 
 
 def _utcnow() -> str:
@@ -193,19 +194,27 @@ class ModelStore:
                     "display_name": model.get("display_name"),
                 }
 
+        candidates: list[tuple[str, dict[str, Any]]] = []
         for user_model in enabled_models:
-            if task.value in user_model.get("assigned_tasks", []):
-                tag = user_model["ollama_tag"]
-                resolved_tag = self._resolve_installed_tag(tag, installed_tags)
-                if not installed_tags or resolved_tag:
-                    litellm = f"ollama/{resolved_tag or tag}"
-                    return litellm, {
-                        "task": task.value,
-                        "model": litellm,
-                        "source": "assigned_tasks",
-                        "model_id": user_model["id"],
-                        "display_name": user_model.get("display_name"),
-                    }
+            if task.value not in user_model.get("assigned_tasks", []):
+                continue
+            tag = user_model["ollama_tag"]
+            resolved_tag = self._resolve_installed_tag(tag, installed_tags)
+            if installed_tags and not resolved_tag:
+                continue
+            litellm = f"ollama/{resolved_tag or tag}"
+            candidates.append((litellm, user_model))
+
+        if candidates:
+            litellm, user_model = self._pick_best_candidate(candidates)
+            return litellm, {
+                "task": task.value,
+                "model": litellm,
+                "source": "assigned_tasks",
+                "model_id": user_model["id"],
+                "display_name": user_model.get("display_name"),
+                **({"ranked_by_performance": True} if len(candidates) > 1 else {}),
+            }
 
         for user_model in enabled_models:
             if TaskType.GENERAL.value in user_model.get("assigned_tasks", []):
@@ -234,6 +243,33 @@ class ModelStore:
             "model": settings.default_model,
             "source": "hard_default",
         }
+
+    @staticmethod
+    def _pick_best_candidate(
+        candidates: list[tuple[str, dict[str, Any]]],
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        Pick the best of several models assigned to the same task.
+
+        Prefers models not known to be inaccessible, then higher measured
+        throughput. Unmeasured models are treated as accessible with a
+        neutral speed score, so they lose only to an actually-faster
+        measured model and otherwise keep their original list order.
+
+        :param candidates: (litellm_model, user_model) pairs assigned to the task
+        :return: The highest-scoring candidate
+        """
+
+        def score(item: tuple[str, dict[str, Any]]) -> tuple[bool, float]:
+            litellm_model, _ = item
+            perf = performance_store.get_model(litellm_model)
+            if not perf:
+                return (True, 0.0)
+            accessible = perf.get("accessible") is not False
+            tokens_per_second = perf.get("tokens_per_second") or 0.0
+            return (accessible, tokens_per_second)
+
+        return max(candidates, key=score)
 
     def resolve_ollama_litellm_model(
         self,

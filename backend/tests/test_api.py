@@ -128,6 +128,31 @@ def test_model_performance_endpoints(api_client: TestClient, monkeypatch) -> Non
     assert post_resp.json()["measured_count"] == 1
 
 
+def test_model_performance_startup_benchmark_runs_once_per_process(
+    api_client: TestClient, monkeypatch,
+) -> None:
+    """Only the first startup-benchmark call actually runs; later ones are no-ops."""
+    monkeypatch.setattr(
+        "agentforge.services.model_performance_service._startup_benchmark_triggered", False,
+    )
+    calls = {"count": 0}
+
+    async def fake_benchmark():
+        calls["count"] += 1
+        return {"models": [], "measured_count": 0, "total_count": 0}
+
+    monkeypatch.setattr("agentforge.api.routes.benchmark_all_models", fake_benchmark)
+
+    first = api_client.post("/api/llm/performance/benchmark/startup")
+    second = api_client.post("/api/llm/performance/benchmark/startup")
+
+    assert first.status_code == 200
+    assert first.json() == {"started": True}
+    assert second.status_code == 200
+    assert second.json() == {"started": False}
+    assert calls["count"] == 1
+
+
 def test_setup_workflow(api_client: TestClient) -> None:
     """Setup status, skip, and resume endpoints work."""
     status = api_client.get("/api/setup/status").json()

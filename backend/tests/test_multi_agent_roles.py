@@ -84,7 +84,7 @@ def test_parallel_round_disabled_for_file_creation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_multi_agent_developer_tools_then_reviewer(monkeypatch, tmp_path) -> None:
+async def test_multi_agent_developer_tools_then_reviewer(monkeypatch, tmp_path, chat_ready) -> None:
     """Developer file writes are summarized; reviewer stays in review mode."""
     chat = await conversation_store.create_chat(
         ChatCreate(

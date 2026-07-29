@@ -148,6 +148,12 @@ export interface OrchestrationResult {
   effective_execution_strategy?: ExecutionStrategy;
 }
 
+export interface ModelPerformanceSample {
+  tokens_per_second: number;
+  measured_at: string;
+  source: string;
+}
+
 export interface ModelPerformanceEntry {
   model: string;
   display_name: string;
@@ -157,6 +163,7 @@ export interface ModelPerformanceEntry {
   last_measured_at: string;
   source: string;
   last_error?: string | null;
+  recent_samples?: ModelPerformanceSample[];
 }
 
 export interface ModelPerformanceReport {

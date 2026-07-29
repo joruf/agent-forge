@@ -96,6 +96,7 @@ class LLMProvider:
             kwargs["tool_choice"] = "auto"
         if self._is_ollama_model(resolved_model):
             kwargs["num_ctx"] = settings.ollama_num_ctx
+            kwargs["keep_alive"] = settings.ollama_keep_alive
 
         last_exc: Exception | None = None
         for attempt in range(2):
@@ -205,6 +206,7 @@ class LLMProvider:
             kwargs["tool_choice"] = "auto"
         if self._is_ollama_model(resolved_model):
             kwargs["num_ctx"] = settings.ollama_num_ctx
+            kwargs["keep_alive"] = settings.ollama_keep_alive
 
         chunks: list[Any] = []
         try:

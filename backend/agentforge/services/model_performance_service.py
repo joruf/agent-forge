@@ -15,6 +15,24 @@ from agentforge.storage.model_store import model_store
 from agentforge.storage.performance_store import performance_store
 
 _BENCHMARK_PROMPT = "Reply with one word: OK"
+_startup_benchmark_triggered = False
+
+
+def claim_startup_benchmark() -> bool:
+    """
+    Claim the one-time startup benchmark slot for this backend process.
+
+    Guards against every open frontend tab independently triggering its own
+    full benchmark run — only the first caller (across all tabs/clients) gets
+    True; every later call this process lifetime gets False.
+
+    :return: True if this call may proceed with the startup benchmark
+    """
+    global _startup_benchmark_triggered
+    if _startup_benchmark_triggered:
+        return False
+    _startup_benchmark_triggered = True
+    return True
 
 
 async def collect_benchmark_targets() -> list[tuple[str, str]]:

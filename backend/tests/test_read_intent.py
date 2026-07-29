@@ -108,7 +108,7 @@ def test_build_read_task_summary_formats_user_response(monkeypatch, tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_multi_agent_read_uses_prefetched_summary(monkeypatch, tmp_path: Path) -> None:
+async def test_multi_agent_read_uses_prefetched_summary(monkeypatch, tmp_path: Path, chat_ready) -> None:
     """Multi-agent read requests return verified file content to the user."""
     from agentforge.models.schemas import ChatCreate, ChatMemorySettings
     from agentforge.storage.conversation_store import conversation_store

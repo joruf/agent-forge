@@ -9,6 +9,8 @@ from typing import Any
 
 from agentforge.config import settings
 
+MAX_RECENT_SAMPLES = 5
+
 
 def _utcnow() -> str:
     """
@@ -101,6 +103,7 @@ class PerformanceStore:
         existing = (self._data.get("models") or {}).get(key, {})
         sample_count = int(existing.get("sample_count") or 0)
         previous_tps = existing.get("tokens_per_second")
+        recent_samples = list(existing.get("recent_samples") or [])
 
         merged_tps = previous_tps
         if tokens_per_second is not None and tokens_per_second > 0:
@@ -109,6 +112,14 @@ class PerformanceStore:
             else:
                 merged_tps = round(float(tokens_per_second), 2)
             sample_count += 1
+            recent_samples.append(
+                {
+                    "tokens_per_second": round(float(tokens_per_second), 2),
+                    "measured_at": _utcnow(),
+                    "source": source,
+                }
+            )
+            recent_samples = recent_samples[-MAX_RECENT_SAMPLES:]
         elif source == "benchmark" and accessible:
             sample_count = max(sample_count, 1)
 
@@ -121,6 +132,7 @@ class PerformanceStore:
             "last_measured_at": _utcnow(),
             "source": source,
             "last_error": error,
+            "recent_samples": recent_samples,
         }
         self._data.setdefault("models", {})[key] = entry
         self._save()

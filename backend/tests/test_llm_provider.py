@@ -35,6 +35,24 @@ async def test_complete_sets_num_ctx_for_ollama_models(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_complete_sets_keep_alive_for_ollama_models(monkeypatch) -> None:
+    """Ollama-routed requests include the configured keep_alive."""
+    monkeypatch.setattr(settings, "ollama_keep_alive", "45m")
+    captured: dict = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return _fake_response()
+
+    monkeypatch.setattr("agentforge.llm.provider.litellm.acompletion", fake_acompletion)
+
+    provider = LLMProvider(LLMConfig(model="ollama/llama3.1:8b"))
+    await provider.complete([{"role": "user", "content": "hi"}])
+
+    assert captured["keep_alive"] == "45m"
+
+
+@pytest.mark.asyncio
 async def test_complete_omits_num_ctx_for_cloud_models(monkeypatch) -> None:
     """Non-Ollama requests never receive the Ollama-only num_ctx param."""
     captured: dict = {}
@@ -49,6 +67,7 @@ async def test_complete_omits_num_ctx_for_cloud_models(monkeypatch) -> None:
     await provider.complete([{"role": "user", "content": "hi"}])
 
     assert "num_ctx" not in captured
+    assert "keep_alive" not in captured
 
 
 @pytest.mark.asyncio
@@ -72,6 +91,29 @@ async def test_complete_stream_sets_num_ctx_for_ollama_models(monkeypatch) -> No
         pass
 
     assert captured["num_ctx"] == 16384
+
+
+@pytest.mark.asyncio
+async def test_complete_stream_sets_keep_alive_for_ollama_models(monkeypatch) -> None:
+    """Streaming requests to Ollama also include keep_alive."""
+    monkeypatch.setattr(settings, "ollama_keep_alive", "1h")
+    captured: dict = {}
+
+    async def fake_stream():
+        return
+        yield  # pragma: no cover - makes this an async generator
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return fake_stream()
+
+    monkeypatch.setattr("agentforge.llm.provider.litellm.acompletion", fake_acompletion)
+
+    provider = LLMProvider(LLMConfig(model="ollama/llama3.1:8b"))
+    async for _ in provider.complete_stream([{"role": "user", "content": "hi"}]):
+        pass
+
+    assert captured["keep_alive"] == "1h"
 
 
 @pytest.mark.asyncio

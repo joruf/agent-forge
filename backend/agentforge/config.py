@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     override_model: str = ""
     ollama_base_url: str = "http://localhost:11434"
     ollama_num_ctx: int = 8192
+    ollama_keep_alive: str = "30m"
     llm_auto_routing: bool = True
     benchmark_at_startup: bool = False
     ui_language: str = "en"

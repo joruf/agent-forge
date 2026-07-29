@@ -1147,6 +1147,17 @@ body.sidebar-resizing {
   font-weight: 600;
 }
 
+.model-performance-speed-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-performance-sparkline {
+  flex-shrink: 0;
+  display: block;
+}
+
 .model-performance-model-id {
   margin-top: 4px;
   color: var(--text-muted);

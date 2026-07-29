@@ -348,8 +348,11 @@ class EditFileTool(BaseTool):
 
     name = "edit_file"
     description = (
-        "Edit a file at an exact position. Use match_id from search_files, "
-        "or old_string/new_text, or start_line/start_column/end_line/end_column."
+        "Edit a file at an exact position. Prefer old_string + new_text for "
+        "simple text replacements — it needs no prior tool call and no line "
+        "counting. Only use match_id (from a prior search_files call) or the "
+        "start_line/end_line range fields when old_string would be ambiguous "
+        "or you need to insert between exact line boundaries."
     )
 
     def __init__(self, anchor_store: FileAnchorStore | None = None) -> None:
@@ -370,38 +373,50 @@ class EditFileTool(BaseTool):
                             "type": "string",
                             "description": "Relative file path (required unless match_id is used)",
                         },
-                        "match_id": {
-                            "type": "string",
-                            "description": "Match identifier returned by search_files",
-                        },
-                        "old_string": {
-                            "type": "string",
-                            "description": "Exact text to replace (must be unique unless replace_all)",
-                        },
                         "new_text": {
                             "type": "string",
                             "description": "Replacement text",
                         },
-                        "start_line": {
-                            "type": "integer",
-                            "description": "1-based start line for manual range edit",
-                        },
-                        "start_column": {
-                            "type": "integer",
-                            "description": "1-based start column for manual range edit",
-                        },
-                        "end_line": {
-                            "type": "integer",
-                            "description": "1-based end line for manual range edit",
-                        },
-                        "end_column": {
-                            "type": "integer",
-                            "description": "1-based end column for manual range edit",
+                        "old_string": {
+                            "type": "string",
+                            "description": (
+                                "RECOMMENDED: exact text to replace. Must be unique in the "
+                                "file unless replace_all is set. No other field is needed "
+                                "alongside this one."
+                            ),
                         },
                         "replace_all": {
                             "type": "boolean",
-                            "description": "Replace every old_string occurrence",
+                            "description": "With old_string, replace every occurrence instead of requiring a unique match",
                             "default": False,
+                        },
+                        "match_id": {
+                            "type": "string",
+                            "description": (
+                                "Advanced: match identifier returned by a prior search_files "
+                                "call. Only use this if you already called search_files — "
+                                "otherwise use old_string instead."
+                            ),
+                        },
+                        "start_line": {
+                            "type": "integer",
+                            "description": (
+                                "Advanced: 1-based start line for a manual line/column range "
+                                "edit. Only use this when old_string can't express the edit "
+                                "(e.g. inserting between exact lines)."
+                            ),
+                        },
+                        "start_column": {
+                            "type": "integer",
+                            "description": "Advanced: 1-based start column for a manual range edit (defaults to line start)",
+                        },
+                        "end_line": {
+                            "type": "integer",
+                            "description": "Advanced: 1-based end line for a manual range edit (defaults to start_line)",
+                        },
+                        "end_column": {
+                            "type": "integer",
+                            "description": "Advanced: 1-based end column for a manual range edit (defaults to line end)",
                         },
                     },
                     "required": ["new_text"],

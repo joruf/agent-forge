@@ -81,6 +81,11 @@ export const api = {
       method: "POST",
     }),
 
+  runStartupModelPerformanceBenchmark: () =>
+    request<{ started: boolean }>("/llm/performance/benchmark/startup", {
+      method: "POST",
+    }),
+
   runModelPerformanceBenchmarkStream: async (
     onProgress: (progress: ModelPerformanceProgress, entry?: ModelPerformanceEntry) => void,
   ): Promise<ModelPerformanceReport> => {
