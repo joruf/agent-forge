@@ -1,5 +1,0 @@
-description: Test role
-id: test_role
-is_builtin: false
-name: Test
-system_prompt: You are a test.

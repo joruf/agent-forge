@@ -39,9 +39,10 @@ describe("role constants", () => {
     expect(SDLC_ROLE_ORDER).toContain("devops");
   });
 
-  it("defaults multi-agent selection to PM, developer, reviewer, and tester", () => {
+  it("defaults multi-agent selection to PM, architect, developer, reviewer, and tester", () => {
     expect(DEFAULT_MULTI_ROLES).toEqual([
       "project_manager",
+      "architect",
       "developer",
       "reviewer",
       "software_tester",

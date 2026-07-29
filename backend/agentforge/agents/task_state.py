@@ -16,7 +16,15 @@ from agentforge.agents.workspace_agenda import (
     build_workspace_agenda,
     format_agenda_block,
 )
-from agentforge.agents.workspace_executor import plan_deliverable_files
+from agentforge.agents.workspace_executor import (
+    collect_non_runnable_implementation_paths,
+    collect_placeholder_implementation_paths,
+    is_placeholder_content,
+    is_runnable_python_content,
+    is_substantive_software_creation,
+    plan_deliverable_files,
+    read_workspace_file,
+)
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.memory.store import memory_store
 
@@ -560,7 +568,9 @@ def record_tool_result_as_fact(
     :param agent_id: Agent role identifier
     :param round_num: Orchestration round index
     """
-    if task_state is None or not success:
+    if task_state is None:
+        return
+    if not success and tool_name != "run_command":
         return
 
     try:
@@ -635,6 +645,180 @@ def _first_step_error_reason(task_state: TaskState) -> str | None:
     return None
 
 
+def _check_implementation_quality(task_state: TaskState) -> CompletionReport | None:
+    """
+    Fail completion when substantive software deliverables are placeholder-only.
+
+    :param task_state: Active task board
+    :return: Failure report or None when quality checks pass or do not apply
+    """
+    if task_state.task_type not in {
+        TaskType.WRITE_FILES,
+        TaskType.WRITE_THEN_READ,
+        TaskType.WORKFLOW,
+    }:
+        return None
+
+    processing_content = task_state.interpreted_request or task_state.user_request
+    intent = detect_workspace_intent(processing_content)
+    if not is_substantive_software_creation(processing_content, intent):
+        return None
+
+    required_paths = collect_required_write_paths(task_state)
+    placeholders = collect_placeholder_implementation_paths(
+        processing_content,
+        intent,
+        required_paths,
+    )
+    non_runnable = collect_non_runnable_implementation_paths(
+        processing_content,
+        intent,
+        required_paths,
+    )
+    if non_runnable:
+        return CompletionReport(
+            complete=False,
+            reason=(
+                "Deliverable Python does not compile or is missing dependencies "
+                "(requirements.txt)"
+            ),
+            missing=non_runnable,
+        )
+    if placeholders:
+        return CompletionReport(
+            complete=False,
+            reason=(
+                "Deliverable files contain placeholder or stub content "
+                "instead of a working implementation"
+            ),
+            missing=placeholders,
+        )
+
+    failed_command = _check_failed_deliverable_commands(task_state, required_paths)
+    if failed_command is not None:
+        return failed_command
+
+    return None
+
+
+def _python_deliverable_paths(
+    task_state: TaskState,
+    required_paths: list[str],
+) -> list[str]:
+    """
+    Collect Python deliverable paths from required paths, targets, and write facts.
+
+    :param task_state: Active task board
+    :param required_paths: Canonical required write paths
+    :return: Deduplicated Python file paths
+    """
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for path in required_paths + list(task_state.targets):
+        if not path.endswith(".py"):
+            continue
+        normalized = _normalize_relative_path(path)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            candidates.append(normalized)
+    for fact in task_state.verified_facts("file_written"):
+        if not fact.path or not fact.path.endswith(".py"):
+            continue
+        normalized = _normalize_relative_path(fact.path)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            candidates.append(normalized)
+    return candidates
+
+
+def _check_failed_deliverable_commands(
+    task_state: TaskState,
+    required_paths: list[str],
+) -> CompletionReport | None:
+    """
+    Fail completion when recent pip/python verification commands failed.
+
+    :param task_state: Active task board
+    :param required_paths: Canonical deliverable paths
+    :return: Failure report or None when no blocking command failures exist
+    """
+    python_paths = _python_deliverable_paths(task_state, required_paths)
+    if not python_paths:
+        return None
+
+    for fact in reversed(task_state.facts):
+        if fact.kind != "command_output" or fact.verified:
+            continue
+        command_text = (fact.path or fact.content or "").lower()
+        if not any(token in command_text for token in ("pip", "python", "venv")):
+            continue
+        return CompletionReport(
+            complete=False,
+            reason="Deliverable verification command failed (pip/python/venv)",
+            missing=python_paths,
+        )
+    return None
+
+
+def _write_path_has_implementation(path: str, task_state: TaskState) -> bool:
+    """
+    Return True when a required write path exists with non-placeholder content.
+
+    :param path: Workspace-relative file path
+    :param task_state: Active task board
+    :return: Whether the path satisfies implementation-quality checks
+    """
+    processing_content = task_state.interpreted_request or task_state.user_request
+    intent = detect_workspace_intent(processing_content)
+    if not is_substantive_software_creation(processing_content, intent):
+        return True
+
+    normalized = _normalize_relative_path(path)
+    for kind in ("file_written", "file_edited"):
+        if not any(
+            _normalize_relative_path(fact.path) == normalized
+            for fact in task_state.verified_facts(kind)
+            if fact.path
+        ):
+            continue
+        success, content = read_workspace_file(normalized)
+        if success and not is_placeholder_content(content, normalized):
+            if normalized.endswith(".py") and not is_runnable_python_content(
+                content,
+                normalized,
+                user_content=processing_content,
+            ):
+                return False
+            return True
+        return False
+
+    success, content = read_workspace_file(normalized)
+    if not success:
+        return False
+    if is_placeholder_content(content, normalized):
+        return False
+    if normalized.endswith(".py"):
+        return is_runnable_python_content(
+            content,
+            normalized,
+            user_content=processing_content,
+        )
+    return True
+
+
+def _finalize_write_files_completion(task_state: TaskState) -> CompletionReport:
+    """
+    Return a completion report for WRITE_FILES after quality gates pass.
+
+    :param task_state: Active task board
+    :return: Completion report
+    """
+    quality = _check_implementation_quality(task_state)
+    if quality is not None:
+        return quality
+    return CompletionReport(complete=True)
+
+
 def check_completion(task_state: TaskState) -> CompletionReport:
     """
     Evaluate whether verified facts satisfy the task completion criteria.
@@ -700,7 +884,10 @@ def check_completion(task_state: TaskState) -> CompletionReport:
 
         required_paths = collect_required_write_paths(task_state)
         if required_paths:
-            return CompletionReport(complete=True)
+            quality = _check_implementation_quality(task_state)
+            if quality is not None:
+                return quality
+            return _finalize_write_files_completion(task_state)
 
         if task_state.targets and not written:
             return CompletionReport(
@@ -729,13 +916,13 @@ def check_completion(task_state: TaskState) -> CompletionReport:
                     missing=missing_writes,
                 )
         if written and not task_state.targets and not write_paths:
-            return CompletionReport(complete=True)
+            return _finalize_write_files_completion(task_state)
         if not written:
             return CompletionReport(
                 complete=False,
                 reason="No verified writes recorded",
             )
-        return CompletionReport(complete=True)
+        return _finalize_write_files_completion(task_state)
 
     if task_state.task_type == TaskType.WRITE_THEN_READ:
         written = {
@@ -792,6 +979,9 @@ def check_completion(task_state: TaskState) -> CompletionReport:
                 reason="Missing verified file content after write",
                 missing=missing_reads,
             )
+        quality = _check_implementation_quality(task_state)
+        if quality is not None:
+            return quality
         return CompletionReport(complete=True)
 
     if task_state.task_type == TaskType.WORKFLOW:
@@ -937,6 +1127,9 @@ def check_completion(task_state: TaskState) -> CompletionReport:
                     reason=reason,
                     missing=[step.path],
                 )
+        quality = _check_implementation_quality(task_state)
+        if quality is not None:
+            return quality
         return CompletionReport(complete=True)
 
     if task_state.task_type == TaskType.LIST_DIRECTORY:
@@ -1193,7 +1386,11 @@ def format_role_output_schema(role_id: str, task_type: TaskType) -> str:
             "\n\nResponse format:\n"
             "FINDINGS: bullet list\n"
             "SEVERITY: low|medium|high\n"
-            "RECOMMENDATION: one concrete next step"
+            "RECOMMENDATION: one concrete next step\n"
+            "When run_command is available for Python deliverables, run "
+            "`python -m py_compile <path>` and report the result in FINDINGS. "
+            "Do not create virtual environments or run `python main.py` for GUI "
+            "deliverables unless explicitly requested."
         )
 
     return ""
@@ -1648,7 +1845,7 @@ def _step_is_complete(
                 for fact in task_state.verified_facts(kind)
                 if fact.path
             ):
-                return True
+                return _write_path_has_implementation(path, task_state)
         return False
     if action == "read_file":
         if path:

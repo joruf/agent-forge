@@ -7,6 +7,7 @@ from agentforge.agents.workspace_intent import (
     PATH_AFTER_KEYWORD,
     _extract_paths,
     detect_workspace_intent,
+    is_conversational_request,
 )
 from agentforge.config import settings
 
@@ -117,3 +118,18 @@ def test_emailsender_prompt_maps_to_canonical_directory(monkeypatch) -> None:
 
     assert "GitHub/emailsender" in intent.target_dirs
     assert "GitHub/emailsender/for" not in intent.target_dirs
+
+
+def test_is_conversational_request_greeting() -> None:
+    assert is_conversational_request("hi") is True
+    assert is_conversational_request("Hi!") is True
+    assert is_conversational_request("hallo") is True
+    assert is_conversational_request("guten tag") is True
+    assert is_conversational_request("hey there") is True
+
+
+def test_is_conversational_request_workspace_task() -> None:
+    assert is_conversational_request("list files in src/") is False
+    assert is_conversational_request("create a new API endpoint") is False
+    intent = detect_workspace_intent("write README.md in docs/")
+    assert is_conversational_request("write README.md in docs/", intent=intent) is False

@@ -174,3 +174,175 @@ async def test_multi_agent_developer_tools_then_reviewer(monkeypatch, tmp_path, 
     )
     assert result.messages
     assert "index.php" in result.messages[-1].content.lower() or result.messages[-1].content
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_hi_uses_conversational_path(monkeypatch, chat_ready) -> None:
+    """Simple greetings skip full multi-agent orchestration and task board setup."""
+    chat = await conversation_store.create_chat(
+        ChatCreate(
+            title="New Chat",
+            mode="multi",
+            role_ids=["project_manager", "developer", "reviewer"],
+            memory=ChatMemorySettings(),
+        )
+    )
+    orchestrator = AgentOrchestrator()
+    agent_loop_calls = {"count": 0}
+    events: list[dict] = []
+
+    async def fake_agent_loop(*args, **kwargs):
+        agent_loop_calls["count"] += 1
+        raise AssertionError("_agent_loop should not run for conversational greetings")
+
+    async def fake_stream_llm_complete(
+        self,
+        llm,
+        messages,
+        on_event=None,
+        **kwargs,
+    ):
+        return (
+            "Hello! How can I help you today?",
+            "ollama/mock-pm",
+            [],
+            False,
+        )
+
+    async def capture_event(payload: dict) -> None:
+        events.append(payload)
+
+    monkeypatch.setattr(AgentOrchestrator, "_agent_loop", fake_agent_loop)
+    monkeypatch.setattr(AgentOrchestrator, "_stream_llm_complete", fake_stream_llm_complete)
+
+    result = await orchestrator.run(
+        chat.id,
+        "hi",
+        OrchestrationMode.MULTI,
+        ["project_manager", "developer", "reviewer"],
+        on_event=capture_event,
+    )
+
+    assert agent_loop_calls["count"] == 0
+    assert result.messages
+    assert result.messages[-1].metadata.get("conversational_multi") is True
+    assert result.messages[-1].metadata.get("action_gate", {}).get("category") == "conversational"
+    assert "Hello" in result.messages[-1].content
+    assert len(result.agent_discussions) == 1
+    assert not any(event.get("type") == "task_board_updated" for event in events)
+    assert any(
+        event.get("type") == "action_gate_decision" and event.get("category") == "conversational"
+        for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_danke_skips_agent_loop(monkeypatch, chat_ready) -> None:
+    """Acknowledgments skip multi-agent orchestration."""
+    chat = await conversation_store.create_chat(
+        ChatCreate(
+            title="New Chat",
+            mode="multi",
+            role_ids=["project_manager", "developer", "reviewer"],
+            memory=ChatMemorySettings(),
+        )
+    )
+    orchestrator = AgentOrchestrator()
+    agent_loop_calls = {"count": 0}
+
+    async def fake_agent_loop(*args, **kwargs):
+        agent_loop_calls["count"] += 1
+        raise AssertionError("_agent_loop should not run for acknowledgments")
+
+    async def fake_stream_llm_complete(self, llm, messages, on_event=None, **kwargs):
+        return ("Gern geschehen!", "ollama/mock-pm", [], False)
+
+    monkeypatch.setattr(AgentOrchestrator, "_agent_loop", fake_agent_loop)
+    monkeypatch.setattr(AgentOrchestrator, "_stream_llm_complete", fake_stream_llm_complete)
+
+    result = await orchestrator.run(
+        chat.id,
+        "danke",
+        OrchestrationMode.MULTI,
+        ["project_manager", "developer", "reviewer"],
+    )
+
+    assert agent_loop_calls["count"] == 0
+    assert result.messages[-1].metadata.get("action_gate", {}).get("category") == "acknowledgment"
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_informational_question_skips_agent_loop(monkeypatch, chat_ready) -> None:
+    """Informational questions skip multi-agent orchestration in MULTI mode."""
+    chat = await conversation_store.create_chat(
+        ChatCreate(
+            title="New Chat",
+            mode="multi",
+            role_ids=["project_manager", "developer", "reviewer"],
+            memory=ChatMemorySettings(),
+        )
+    )
+    orchestrator = AgentOrchestrator()
+    agent_loop_calls = {"count": 0}
+
+    async def fake_agent_loop(*args, **kwargs):
+        agent_loop_calls["count"] += 1
+        raise AssertionError("_agent_loop should not run for informational questions")
+
+    async def fake_stream_llm_complete(self, llm, messages, on_event=None, **kwargs):
+        return (
+            "AgentForge is a multi-agent coding assistant.",
+            "ollama/mock-pm",
+            [],
+            False,
+        )
+
+    monkeypatch.setattr(AgentOrchestrator, "_agent_loop", fake_agent_loop)
+    monkeypatch.setattr(AgentOrchestrator, "_stream_llm_complete", fake_stream_llm_complete)
+
+    result = await orchestrator.run(
+        chat.id,
+        "was ist das?",
+        OrchestrationMode.MULTI,
+        ["project_manager", "developer", "reviewer"],
+    )
+
+    assert agent_loop_calls["count"] == 0
+    assert result.messages[-1].metadata.get("action_gate", {}).get("category") == "informational"
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_create_index_php_runs_agent_loop(monkeypatch, chat_ready) -> None:
+    """Workspace tasks must not be blocked by the action gate."""
+    chat = await conversation_store.create_chat(
+        ChatCreate(
+            title="New Chat",
+            mode="multi",
+            role_ids=["project_manager", "developer", "reviewer"],
+            memory=ChatMemorySettings(),
+        )
+    )
+    orchestrator = AgentOrchestrator()
+    agent_loop_calls = {"count": 0}
+
+    async def fake_agent_loop(*args, **kwargs):
+        agent_loop_calls["count"] += 1
+        return (
+            "Created index.php",
+            {"model": "ollama/mock-dev", "role_id": "developer"},
+        )
+
+    async def fake_stream_llm_complete(self, llm, messages, on_event=None, **kwargs):
+        return ("Please create index.php", "ollama/mock-pm", [], False)
+
+    monkeypatch.setattr(AgentOrchestrator, "_agent_loop", fake_agent_loop)
+    monkeypatch.setattr(AgentOrchestrator, "_stream_llm_complete", fake_stream_llm_complete)
+
+    await orchestrator.run(
+        chat.id,
+        "create index.php",
+        OrchestrationMode.MULTI,
+        ["project_manager", "developer", "reviewer"],
+    )
+
+    assert agent_loop_calls["count"] >= 1

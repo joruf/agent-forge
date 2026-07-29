@@ -152,9 +152,20 @@ export default function App() {
   }, [backendOnline, settings?.benchmark_at_startup, readiness?.chat_ready]);
 
   useEffect(() => {
+    let fastAttempts = 0;
+    const fastInterval = setInterval(() => {
+      fastAttempts += 1;
+      void refresh();
+      if (fastAttempts >= 30) {
+        clearInterval(fastInterval);
+      }
+    }, 1000);
+    const slowInterval = setInterval(() => void refresh(), 10000);
     void refresh();
-    const interval = setInterval(() => void refresh(), 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(fastInterval);
+      clearInterval(slowInterval);
+    };
   }, [refresh]);
 
   const handleNewChat = (mode: OrchestrationMode) => {

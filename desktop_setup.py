@@ -114,6 +114,11 @@ def install_icon_theme() -> None:
 
     Many Linux desktops render SVG taskbar icons as a black square; PNG hicolor
     entries avoid that and match StartupWMClass=agentforge.
+
+    Important: never create or overwrite ``~/.local/share/icons/hicolor/index.theme``.
+    An incomplete user index.theme shadows the system hicolor theme and breaks
+    Nemo/Cinnamon toolbar and tray icons. Desktop entries use an absolute Icon=
+    path, so AgentForge stays usable without touching theme metadata.
     """
     source_dir = SCRIPT_DIR / "assets" / "icons"
     if not source_dir.is_dir():
@@ -135,13 +140,11 @@ def install_icon_theme() -> None:
         target_path = target_dir / f"{ICON_THEME_NAME}.png"
         target_path.write_bytes(source.read_bytes())
 
-    index_theme = source_dir / "index.theme"
-    if index_theme.is_file():
-        ICON_THEME_DIR.mkdir(parents=True, exist_ok=True)
-        (ICON_THEME_DIR / "index.theme").write_bytes(index_theme.read_bytes())
-
+    # Refresh cache only when a pre-existing index.theme is present. Never write
+    # or replace theme metadata — that previously broke desktop/system icons.
+    index_theme_path = ICON_THEME_DIR / "index.theme"
     cache_binary = which("gtk-update-icon-cache")
-    if cache_binary and ICON_THEME_DIR.is_dir():
+    if cache_binary and index_theme_path.is_file():
         subprocess.run(
             [cache_binary, "-f", "-t", str(ICON_THEME_DIR)],
             check=False,
@@ -156,6 +159,7 @@ def install_icon_theme() -> None:
             [
                 xdg_icon,
                 "install",
+                "--novendor",
                 "--context",
                 "apps",
                 "--size",
@@ -206,6 +210,8 @@ def _ui_lang() -> str:
 
 def maybe_prompt_desktop_setup() -> None:
     """Ask once on first run whether to create a desktop shortcut."""
+    if os.environ.get("AGENTFORGE_SKIP_DESKTOP_SETUP", "").strip() in ("1", "true", "yes"):
+        return
     if INIT_FILE.exists():
         return
 

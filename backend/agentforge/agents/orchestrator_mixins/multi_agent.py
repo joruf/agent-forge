@@ -22,6 +22,7 @@ from agentforge.agents.task_state import (
     build_pm_verification_block,
     build_task_state,
     check_completion,
+    collect_required_write_paths,
     discussion_entry_is_repeat,
     format_role_output_schema,
     format_task_board_block,
@@ -48,13 +49,23 @@ from agentforge.agents.compound_planner import (
     is_compound_request,
 )
 from agentforge.agents.workspace_agenda import AgendaAction, build_workspace_agenda
-from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
+from agentforge.agents.action_requirement import (
+    ActionCategory,
+    ActionRequirementResult,
+    analyze_action_requirement,
+)
+from agentforge.agents.workspace_intent import (
+    WorkspaceIntent,
+    detect_workspace_intent,
+)
 from agentforge.agents.workspace_executor import (
     apply_file_text_replacement,
     build_deliverable_status_summary,
     build_implementation_prompt,
     build_materialization_prompt,
     build_read_task_summary,
+    collect_non_runnable_implementation_paths,
+    collect_placeholder_implementation_paths,
     fallback_file_content,
     file_exists_in_workspace,
     missing_requested_files,
@@ -75,6 +86,7 @@ from agentforge.models.schemas import (
     ExecutionStrategy,
     MessageRole,
     MessageResponse,
+    OrchestrationMode,
     OrchestrationResponse,
     ToolCallResult,
 )
@@ -94,6 +106,34 @@ from agentforge.services.command_audit import (
 # the PM final-synthesis turn used the full, unbounded transcript. Durable facts (files
 # read/written, task status) still reach it via the task board block in the system prompt.
 FINAL_SYNTHESIS_TRANSCRIPT_TAIL = 16
+
+_NO_ACTION_SYSTEM_PROMPTS: dict[ActionCategory, str] = {
+    ActionCategory.CONVERSATIONAL: (
+        "You are the Project Manager in AgentForge, a multi-agent coding assistant. "
+        "The user sent a casual or simple message without a workspace task. "
+        "Reply naturally, warmly, and briefly in the user's language. "
+        "Do not ask clarifying questions for simple greetings. "
+        "Do not mention tools, task plans, team coordination, or JSON. "
+        "Offer help in one short sentence if appropriate."
+    ),
+    ActionCategory.ACKNOWLEDGMENT: (
+        "You are the Project Manager in AgentForge. "
+        "The user sent a brief acknowledgment or thanks. "
+        "Reply warmly and briefly in the user's language. "
+        "Do not mention tools, task plans, or team coordination."
+    ),
+    ActionCategory.INFORMATIONAL: (
+        "You are the Project Manager in AgentForge. "
+        "The user asked an informational question that does not require workspace tools. "
+        "Give a short, direct answer in the user's language. "
+        "Do not invoke developers, reviewers, tools, or task plans."
+    ),
+    ActionCategory.EMPTY: (
+        "You are the Project Manager in AgentForge. "
+        "The user message was empty. "
+        "Reply briefly that you did not receive a request and offer help."
+    ),
+}
 
 
 class MultiAgentMixin:
@@ -144,6 +184,8 @@ class MultiAgentMixin:
             workspace_note = (
                 "\n\nIMPORTANT: The user wants files saved on disk. "
                 "Use write_file for every file you create. "
+                "Write complete, runnable code — no placeholders, TODO stubs, or "
+                "'implement here' comments. "
                 "Do not paste code or JSON templates in chat."
             )
             if planned:
@@ -247,22 +289,28 @@ class MultiAgentMixin:
         schema = ""
         if task_state:
             schema = format_role_output_schema(role_id, task_state.task_type)
-        if role_id == "reviewer":
-            return (
-                "\n\nReview the existing discussion only. Do not generate full HTML, "
-                "PHP, or complete implementations. Give brief, actionable feedback."
-                + schema
-            )
         if role_id == "developer":
             return (
                 "\n\nIf you use read_file, quote the file content for the team. "
-                "If you use write_file or run_command, summarize what you changed."
+                "If you use write_file or run_command, summarize what you changed. "
+                "For software creation tasks, write complete runnable implementations — "
+                "never placeholders or TODO-only stubs."
+                + schema
+            )
+        if role_id == "reviewer":
+            return (
+                "\n\nReview the existing discussion only. Do not generate full HTML, "
+                "PHP, or complete implementations. Give brief, actionable feedback. "
+                "VERDICT must be fail when deliverables are placeholders or missing "
+                "real implementation."
                 + schema
             )
         if role_id in {"software_tester", "security"}:
             return (
                 "\n\nAnalyze and report findings only. Do not replace the Developer "
-                "by outputting full implementations."
+                "by outputting full implementations. When run_command is available, "
+                "run `python -m py_compile` on Python deliverables and include the "
+                "result in FINDINGS."
                 + schema
             )
         if role_id == "project_manager":
@@ -408,6 +456,10 @@ class MultiAgentMixin:
         :return: Tuple of (content, routing metadata, discussion message)
         """
         intent = workspace_intent or detect_workspace_intent(user_content)
+        needs_tools = intent.requires_tools or self._prompt_needs_tools(
+            user_content,
+            role.id,
+        )
         prompt = self._build_multi_prompt(
             role,
             round_num,
@@ -417,7 +469,7 @@ class MultiAgentMixin:
             task_state=task_state,
         )
         tools_enabled = (
-            (role.id in self.FULL_TOOL_ROLES and (
+            (role.id in self.FULL_TOOL_ROLES and needs_tools and (
                 role.id == "developer"
                 or intent.wants_file_creation
                 or intent.wants_file_read
@@ -438,6 +490,7 @@ class MultiAgentMixin:
             memory_scope,
             tools,
             intent,
+            user_content,
         )
         messages = [
             {"role": "system", "content": system},
@@ -518,6 +571,138 @@ class MultiAgentMixin:
         return content, routing, discussion
 
 
+    def _no_action_system_prompt(self, category: ActionCategory) -> str:
+        """
+        Build the PM system prompt for a no-action gate category.
+
+        :param category: Action gate category
+        :return: System prompt text
+        """
+        return _NO_ACTION_SYSTEM_PROMPTS.get(
+            category,
+            _NO_ACTION_SYSTEM_PROMPTS[ActionCategory.CONVERSATIONAL],
+        )
+
+    async def _run_no_action_multi(
+        self,
+        chat_id: str,
+        user_content: str,
+        memory_context: str,
+        effective_strategy: ExecutionStrategy,
+        on_event: Callable | None,
+        intervention_queue: asyncio.Queue[str] | None = None,
+        action_gate: ActionRequirementResult | None = None,
+    ) -> OrchestrationResponse:
+        """
+        Reply without full multi-agent tool orchestration when the action gate skips work.
+
+        :param chat_id: Chat session ID
+        :param user_content: Original user message
+        :param memory_context: Persistent memory context
+        :param effective_strategy: Resolved execution strategy
+        :param on_event: Optional WebSocket event callback
+        :param intervention_queue: Optional live user input queue
+        :param action_gate: Gate decision driving prompt and metadata
+        :return: Orchestration response with a single PM reply
+        """
+        gate = action_gate or analyze_action_requirement(
+            user_content,
+            mode=OrchestrationMode.MULTI,
+        )
+        pm = role_registry.get_role("project_manager")
+        pm_name = pm.name if pm else "Project Manager"
+        pm_id = pm.id if pm else "project_manager"
+
+        await self._ensure_not_cancelled()
+        llm, routing = await self._resolve_llm(user_content, role_id=pm_id, mode_single=False)
+
+        if on_event:
+            await on_event({
+                "type": "agent_start",
+                "agent_id": pm_id,
+                "agent_name": pm_name,
+                "round": 1,
+            })
+            await on_event({
+                "type": "model_selected",
+                "agent_id": pm_id,
+                "agent_name": pm_name,
+                "routing": routing,
+            })
+
+        system = self._no_action_system_prompt(gate.category)
+        if self._ambient_context:
+            system += f"\n\n{self._ambient_context}"
+        if memory_context:
+            system += f"\n\n{memory_context}"
+
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_content},
+        ]
+
+        content = ""
+        model_used = routing.get("model", llm.config.model)
+        while True:
+            await self._ensure_not_cancelled()
+            await self._append_interventions_to_messages(
+                messages,
+                intervention_queue,
+                on_event,
+            )
+            content, model_used, _tool_calls, _is_error = await self._stream_llm_complete(
+                llm,
+                messages,
+                on_event,
+            )
+            if intervention_queue is None or intervention_queue.empty():
+                break
+            messages.append({"role": "assistant", "content": content})
+
+        routing["model"] = model_used
+        await self._emit_agent_end(on_event, pm_id, pm_name, round_num=1)
+
+        discussion = AgentMessage(
+            from_agent=pm_name,
+            to_agent="team",
+            content=content,
+            timestamp=datetime.now(timezone.utc),
+        )
+        if on_event:
+            await on_event({
+                "type": "agent_message",
+                "discussion": discussion.model_dump(mode="json"),
+                "routing": routing,
+            })
+
+        gate_metadata = {
+            "requires_action": gate.requires_action,
+            "category": gate.category.value,
+            "reason": gate.reason,
+        }
+        metadata: dict[str, Any] = {
+            "routing": routing,
+            "no_action_multi": True,
+            "action_gate": gate_metadata,
+        }
+        if gate.category == ActionCategory.CONVERSATIONAL:
+            metadata["conversational_multi"] = True
+
+        msg = await conversation_store.add_message(
+            chat_id,
+            MessageRole.ASSISTANT,
+            content,
+            metadata=metadata,
+        )
+        return OrchestrationResponse(
+            chat_id=chat_id,
+            messages=[msg],
+            agent_discussions=[discussion],
+            pending_approvals=approval_manager.list_pending(chat_id),
+            effective_execution_strategy=effective_strategy,
+        )
+
+
     async def _run_multi(
         self,
         chat_id: str,
@@ -537,7 +722,7 @@ class MultiAgentMixin:
     ) -> OrchestrationResponse:
         """Multi-agent discussion with project manager synthesis."""
         if not role_ids:
-            role_ids = ["project_manager", "developer", "reviewer"]
+            role_ids = ["project_manager", "architect", "developer", "reviewer"]
 
         prefetched_reads = prefetched_reads or {}
 
@@ -566,6 +751,28 @@ class MultiAgentMixin:
             roles = [pm] + roles
 
         workspace_intent = workspace_intent or detect_workspace_intent(user_content)
+        action_gate = analyze_action_requirement(
+            user_content,
+            intent=workspace_intent,
+            mode=OrchestrationMode.MULTI,
+        )
+        if not action_gate.requires_action:
+            if on_event:
+                await on_event({
+                    "type": "action_gate_decision",
+                    "requires_action": action_gate.requires_action,
+                    "category": action_gate.category.value,
+                    "reason": action_gate.reason,
+                })
+            return await self._run_no_action_multi(
+                chat_id=chat_id,
+                user_content=user_content,
+                memory_context=memory_context,
+                effective_strategy=effective_strategy,
+                on_event=on_event,
+                intervention_queue=intervention_queue,
+                action_gate=action_gate,
+            )
         if task_state is None:
             task_state = build_task_state(user_content, workspace_intent)
         roles = self._order_roles_for_intent(roles, workspace_intent)
@@ -934,6 +1141,33 @@ class MultiAgentMixin:
                 on_event,
                 prefetched_reads,
             )
+
+        placeholder_paths = collect_placeholder_implementation_paths(
+            user_content,
+            workspace_intent,
+            collect_required_write_paths(task_state),
+        )
+        non_runnable_paths = collect_non_runnable_implementation_paths(
+            user_content,
+            workspace_intent,
+            collect_required_write_paths(task_state),
+        )
+        rematerialize_paths = list(dict.fromkeys(placeholder_paths + non_runnable_paths))
+        if rematerialize_paths:
+            rematerialized = await self._materialize_missing_files(
+                user_content,
+                rematerialize_paths,
+                role_id="developer",
+            )
+            if rematerialized:
+                transcript.append(f"Developer: {rematerialized}")
+                self._seed_created_write_facts(
+                    task_state,
+                    user_content,
+                    workspace_intent,
+                    agent_id="developer",
+                    round_num=max_multi_rounds,
+                )
 
         completion = check_completion(task_state)
         verification = build_pm_verification_block(task_state, completion)

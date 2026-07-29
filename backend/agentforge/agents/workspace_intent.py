@@ -464,6 +464,47 @@ def _extract_paths(user_content: str) -> list[str]:
     return _filter_embedded_partial_paths(found)
 
 
+def _read_keyword_is_program_behavior(text: str) -> bool:
+    """
+    Return True when read-like verbs describe program output, not a user read request.
+
+    :param text: User message text
+    :return: Whether matched read keywords refer to application behavior
+    """
+    if not text:
+        return False
+    if re.search(
+        r"\b(zeige\s+mir|show\s+me|lies\s+(?:die|das|den|mir)|lese\s+(?:die|das|den|mir)|"
+        r"read\s+(?:the|this|that|file)|inhalt\s+(?:anzeigen|zeigen)|datei\s+(?:anzeigen|lesen))\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        r"\b(programm|python\s+programm|tool|skript|script|app|anwendung)\b",
+        text,
+        re.IGNORECASE,
+    ) and re.search(
+        r"\b(anzeigt|anzeigen|shows|displays|displaying)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"\b\d+\s*(?:sekunden|seconds|sec|s)\b.*\b(anzeigt|anzeigen|shows|displays)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"\b(anzeigt|anzeigen|shows|displays)\b.*\b(?:animation|3d|fenster|window|video)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return True
+    return False
+
+
 def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
     """
     Detect whether the user wants files read, created, or listed in the workspace.
@@ -475,6 +516,8 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
     wants_list = LIST_DIRECTORY_KEYWORDS.search(text) is not None
     wants_create = CREATE_KEYWORDS.search(text) is not None and not wants_list
     wants_read = READ_KEYWORDS.search(text) is not None
+    if wants_read and _read_keyword_is_program_behavior(text):
+        wants_read = False
     wants_command = COMMAND_KEYWORDS.search(text) is not None
     raw_paths = _extract_paths(text)
 
@@ -598,3 +641,22 @@ def detect_workspace_intent(user_content: str) -> WorkspaceIntent:
         target_dirs=target_dirs,
         raw_paths=raw_paths,
     )
+
+
+def is_conversational_request(
+    user_content: str,
+    intent: WorkspaceIntent | None = None,
+) -> bool:
+    """
+    Return True for short casual messages that should not trigger workspace tools.
+
+    Thin wrapper around :func:`analyze_action_requirement` for backward compatibility.
+
+    :param user_content: User message text
+    :param intent: Optional pre-parsed workspace intent
+    :return: Whether the message is simple conversational small talk
+    """
+    from agentforge.agents.action_requirement import ActionCategory, analyze_action_requirement
+
+    result = analyze_action_requirement(user_content, intent=intent)
+    return not result.requires_action and result.category != ActionCategory.EMPTY

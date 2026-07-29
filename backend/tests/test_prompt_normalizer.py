@@ -9,6 +9,7 @@ from agentforge.agents.prompt_normalizer import (
     prompt_normalization_metadata,
 )
 from agentforge.agents.workspace_intent import detect_workspace_intent
+from agentforge.agents.workspace_intent import detect_workspace_intent
 
 
 @pytest.mark.parametrize(
@@ -121,3 +122,19 @@ def test_normalize_user_prompt_no_change_for_clean_prompt() -> None:
     assert not result.changed
     assert result.normalized == prompt
     assert result.corrections == []
+
+
+def test_normalize_user_prompt_preserves_program_display_verb_anzeigt() -> None:
+    """Conjugated display verbs in program descriptions must not become read intent."""
+    prompt = (
+        "erstelle unter /home/joruf/Dokumente/GitHub/TEst123456 "
+        "ein python programm das 30 sekunden lang eine 3D Animation anzeigt "
+        "und danach beendet"
+    )
+    result = normalize_user_prompt(prompt)
+
+    assert "anzeigt" in result.normalized
+    assert "anzeigen" not in result.normalized
+    intent = detect_workspace_intent(result.normalized)
+    assert intent.wants_file_creation is True
+    assert intent.wants_file_read is False

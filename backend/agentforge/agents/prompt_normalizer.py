@@ -230,6 +230,12 @@ def _should_skip_token(token: str) -> bool:
         "erstellter",
         "erstelltes",
         "h1-tag",
+        "anzeigt",
+        "zeigt",
+        "spielt",
+        "läuft",
+        "beendet",
+        "schließt",
     }:
         return True
     return False

@@ -187,7 +187,13 @@ async def test_workspace_tools_require_audit_context(
     assert logged_commands(audit_events) == []
 
     async with command_audit_scope("audit-workspace", "developer", "Developer", on_audit_event):
-        result_with_scope = await tool.execute(arguments)
+        scoped_arguments = arguments
+        if tool_cls is WriteFileTool:
+            scoped_arguments = {
+                **arguments,
+                "content": str(arguments["content"]) + " (audited)",
+            }
+        result_with_scope = await tool.execute(scoped_arguments)
 
     assert result_with_scope.success is True
     assert any(command.startswith(expected_prefix) for command in logged_commands(audit_events))

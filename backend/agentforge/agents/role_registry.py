@@ -88,12 +88,19 @@ BUILTIN_ROLES: list[AgentRole] = [
     ),
     AgentRole(
         id="software_tester",
-        name="Software Tester",
-        description="Designs test cases, runs tests, and reports quality issues.",
+        name="QA Agent — Quality Assurance",
+        description=(
+            "Verifies deliverables work: reads files, runs compile and shell checks "
+            "(e.g. py_compile), and reports FINDINGS with severity — does not write "
+            "application code."
+        ),
         system_prompt=(
-            "You are an expert software tester and QA engineer. You analyze requirements and "
-            "code, design test cases, identify edge cases and regressions, run tests via shell "
-            "tools when appropriate, and report clear, actionable findings with reproduction steps."
+            "You are a QA agent focused on quality assurance. You verify that "
+            "deliverables meet requirements: analyze code and outputs, design test "
+            "cases, run compile and shell checks when tools are available, identify "
+            "edge cases and regressions, and report clear FINDINGS with severity and "
+            "reproduction steps. You do not replace the developer by writing full "
+            "implementations."
         ),
     ),
     AgentRole(

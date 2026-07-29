@@ -329,7 +329,7 @@ def test_write_files_fails_when_written_to_wrong_directory() -> None:
     )
 
 
-def test_write_files_succeeds_at_required_path() -> None:
+def test_write_files_succeeds_at_required_path(temp_workspace: Path) -> None:
     """Task completion passes when files are written to the required workspace path."""
     prompt = (
         "erstelle mir ein Programm unter /home/joruf/GitHub/emailsender\n"
@@ -337,7 +337,14 @@ def test_write_files_succeeds_at_required_path() -> None:
     )
     intent = detect_workspace_intent(prompt)
     state = build_task_state(prompt, intent)
-    seed_write_facts(state, ["GitHub/emailsender/SimpleEmailSender.php"])
+    relative = "GitHub/emailsender/SimpleEmailSender.php"
+    target = temp_workspace / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "<?php\nclass SimpleEmailSender {}\n",
+        encoding="utf-8",
+    )
+    seed_write_facts(state, [relative])
 
     report = check_completion(state)
     assert report.complete is True
@@ -468,3 +475,30 @@ def test_build_task_board_ui_payload_includes_missing_when_reason_shown() -> Non
     assert payload["complete"] is False
     assert payload["reason"] == "Missing verified writes at required paths"
     assert payload.get("missing") == ["GitHub/emailsender/SimpleEmailSender.php"]
+
+
+PYTHON_ANIMATION_PROMPT = (
+    "erstelle unter GitHub/TEst123456 ein python programm das 30 sekunden lang "
+    "eine 3D Animation anzeigt und danach beendet"
+)
+
+
+def test_failed_python_command_blocks_substantive_completion() -> None:
+    """Failed pip/python verification commands keep the task board open."""
+    intent = detect_workspace_intent(PYTHON_ANIMATION_PROMPT)
+    state = build_task_state(PYTHON_ANIMATION_PROMPT, intent)
+    target = "GitHub/TEst123456/main.py"
+    seed_write_facts(state, [target])
+    record_tool_result_as_fact(
+        state,
+        tool_name="run_command",
+        arguments='{"command": "python main.py"}',
+        output="[Exit 1]\nModuleNotFoundError: No module named 'matplotlib'",
+        success=False,
+        agent_id="developer",
+        round_num=1,
+    )
+
+    report = check_completion(state)
+    assert report.complete is False
+    assert "verification command failed" in report.reason.lower()

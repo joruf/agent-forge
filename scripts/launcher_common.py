@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import signal
@@ -28,6 +29,13 @@ def ensure_dirs() -> None:
     """Create runtime directories."""
     PID_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def launcher_log(message: str) -> None:
+    """Append a message to launcher.log without printing to console."""
+    ensure_dirs()
+    with open(LOG_DIR / "launcher.log", "a", encoding="utf-8") as handle:
+        handle.write(message + "\n")
 
 
 def python_executable() -> Path:
@@ -58,7 +66,7 @@ def free_port(port: int) -> None:
     pids = pids_on_port(port)
     if not pids:
         return
-    print(f"Port {port} belegt — beende alten Prozess...")
+    launcher_log(f"Port {port} belegt — beende alten Prozess...")
     for pid in pids:
         try:
             os.kill(pid, signal.SIGTERM)
@@ -73,17 +81,34 @@ def free_port(port: int) -> None:
     time.sleep(0.5)
 
 
-def wait_for_http(url: str, retries: int = 40) -> None:
+def wait_for_http(url: str, retries: int = 60) -> None:
     """Wait until an HTTP endpoint responds."""
     for _ in range(retries):
-        try:
-            with urllib.request.urlopen(url, timeout=2) as response:
-                if response.status < 500:
-                    return
-        except (urllib.error.URLError, TimeoutError):
-            pass
+        if http_ok(url):
+            return
         time.sleep(0.5)
     raise RuntimeError(f"Nicht erreichbar: {url}")
+
+
+def backend_health_ok() -> bool:
+    """Check whether the backend health endpoint reports status ok."""
+    try:
+        with urllib.request.urlopen(BACKEND_HEALTH, timeout=2) as response:
+            if response.status >= 500:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
+            return payload.get("status") == "ok"
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
+        return False
+
+
+def wait_for_backend_ready(retries: int = 120) -> None:
+    """Wait until /api/health returns status ok (up to ~60s by default)."""
+    for _ in range(retries):
+        if backend_health_ok():
+            return
+        time.sleep(0.5)
+    raise RuntimeError(f"Backend nicht bereit: {BACKEND_HEALTH}")
 
 
 def http_ok(url: str) -> bool:

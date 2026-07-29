@@ -336,7 +336,7 @@
       "clarify": "Clarify",
       "plan": "Plan",
       "execute": "Build",
-      "test": "Test",
+      "test": "QA check",
       "done": "Done"
     }
   },

@@ -23,7 +23,9 @@ import type {
   UserModel,
 } from "../types";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8765/api";
+const API_BASE =
+  import.meta.env.VITE_API_BASE ??
+  (import.meta.env.DEV ? "/api" : "http://127.0.0.1:8765/api");
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -317,8 +319,13 @@ export const api = {
     ),
 
   wsUrl: (chatId: string) => {
-    const base = API_BASE.replace(/^http/, "ws").replace("/api", "");
-    return `${base}/api/ws/chats/${chatId}`;
+    const configured = import.meta.env.VITE_API_BASE?.trim();
+    if (configured && /^https?:\/\//i.test(configured)) {
+      const base = configured.replace(/^http/i, "ws").replace(/\/api\/?$/, "");
+      return `${base}/api/ws/chats/${chatId}`;
+    }
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${window.location.host}/api/ws/chats/${chatId}`;
   },
 
   getSetupStatus: () => request<SetupStatus>("/setup/status"),

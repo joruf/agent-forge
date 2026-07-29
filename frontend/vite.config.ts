@@ -8,6 +8,13 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
     host: "127.0.0.1",
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:8765",
+        changeOrigin: true,
+        ws: true,
+      },
+    },
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {

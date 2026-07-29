@@ -55,7 +55,10 @@
     "researcher": { "name": "Researcher", "description": "Researches external topics via web search and memory; has no file access, so cannot inspect this codebase directly." },
     "documentation": { "name": "Documentation", "description": "Creates and maintains documentation and technical writing." },
     "project_manager": { "name": "Project Manager", "description": "Coordinates agents, involves the user when needed, delivers results." },
-    "software_tester": { "name": "Software Tester", "description": "Designs test cases, runs tests, and reports quality issues." },
+    "software_tester": {
+      "name": "QA Agent — Quality Assurance",
+      "description": "Verifies deliverables work: reads files, runs compile and shell checks (e.g. py_compile), reports FINDINGS with severity — does not write application code."
+    },
     "security": { "name": "Security Engineer", "description": "Reviews code and architecture for security vulnerabilities." },
     "devops": { "name": "DevOps Engineer", "description": "Handles CI/CD, deployment scripts, and infrastructure automation." }
   },

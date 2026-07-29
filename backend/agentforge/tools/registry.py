@@ -40,11 +40,17 @@ def normalize_workspace_relative_path(path_str: str) -> str:
 
     :param path_str: Absolute or workspace-relative path
     :return: Path relative to the workspace root
-    :raises PermissionError: When the path escapes the workspace root
+    :raises PermissionError: When the path escapes the workspace root or is invalid
     """
+    from agentforge.agents.workspace_executor import validate_workspace_relative_path
+
     raw = path_str.strip().strip("'\"")
     if not raw:
         raise PermissionError("Empty path")
+
+    valid, reason = validate_workspace_relative_path(raw)
+    if not valid:
+        raise PermissionError(reason or "Invalid workspace path")
 
     from agentforge.agents.workspace_intent import resolve_under_workspace_root
 
@@ -219,19 +225,37 @@ class WriteFileTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> ToolCallResult:
         """Write file contents."""
+        from agentforge.agents.workspace_executor import (
+            analyze_python_file_details,
+            install_python_requirements,
+            maybe_swap_write_file_arguments,
+            should_skip_redundant_write,
+            sync_requirements_txt,
+            validate_workspace_relative_path,
+        )
         from agentforge.services.command_audit import record_write_file
 
         relative_path = str(arguments["path"])
+        content = str(arguments["content"])
+        relative_path, content = maybe_swap_write_file_arguments(relative_path, content)
+        valid, reason = validate_workspace_relative_path(relative_path)
+        if not valid:
+            output = f"Invalid file path: {reason}"
+            return ToolCallResult(tool=self.name, success=False, output=output)
         try:
             path = _resolve_path(relative_path)
             resolved_relative = normalize_workspace_relative_path(
                 str(path.relative_to(settings.workspace_root.resolve())),
             )
+            if should_skip_redundant_write(resolved_relative, content):
+                output = f"Skipped redundant write: {resolved_relative}"
+                return ToolCallResult(tool=self.name, success=True, output=output)
+
             created_dirs = _parents_to_create(relative_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             if is_document_path(path):
                 try:
-                    write_document_text(path, str(arguments["content"]))
+                    write_document_text(path, content)
                 except OptionalDependencyError as exc:
                     output = str(exc)
                     await record_write_file(
@@ -242,8 +266,26 @@ class WriteFileTool(BaseTool):
                     )
                     return ToolCallResult(tool=self.name, success=False, output=output)
             else:
-                path.write_text(arguments["content"], encoding="utf-8")
+                path.write_text(content, encoding="utf-8")
+
+            req_path: str | None = None
+            if resolved_relative.endswith(".py"):
+                analysis = analyze_python_file_details(content, resolved_relative)
+                if analysis.third_party_packages:
+                    req_path = sync_requirements_txt(
+                        str(Path(resolved_relative).parent),
+                        analysis.third_party_packages,
+                    )
+
             output = f"Written: {resolved_relative}"
+            if req_path:
+                installed, install_message = await install_python_requirements(
+                    str(Path(resolved_relative).parent),
+                )
+                if installed:
+                    output = f"{output}\n{install_message}"
+                else:
+                    output = f"{output}\nNote: {install_message}"
             result = ToolCallResult(tool=self.name, success=True, output=output)
             await record_write_file(
                 resolved_relative,
@@ -254,11 +296,17 @@ class WriteFileTool(BaseTool):
             return result
         except Exception as exc:
             output = str(exc)
+            created_dirs: list[str] = []
+            if valid:
+                try:
+                    created_dirs = _parents_to_create(relative_path)
+                except (OSError, PermissionError):
+                    created_dirs = []
             await record_write_file(
                 relative_path,
                 output=output,
                 success=False,
-                created_dirs=_parents_to_create(relative_path),
+                created_dirs=created_dirs,
             )
             return ToolCallResult(tool=self.name, success=False, output=output)
 

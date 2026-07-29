@@ -42,6 +42,7 @@ from agentforge.agents.prompt_normalizer import (
     normalize_user_prompt,
     prompt_normalization_metadata,
 )
+from agentforge.agents.action_requirement import analyze_action_requirement
 from agentforge.agents.workspace_intent import WorkspaceIntent, detect_workspace_intent
 from agentforge.agents.workspace_path_resolver import (
     activate_path_resolution_context,
@@ -57,6 +58,7 @@ from agentforge.agents.workspace_executor import (
     build_read_task_summary,
     fallback_file_content,
     file_exists_in_workspace,
+    is_substantive_software_creation,
     missing_requested_files,
     plan_deliverable_files,
     prefetch_read_file_contents,
@@ -212,6 +214,7 @@ class AgentOrchestrator(
         memory_scope: str,
         full_tools: ToolRegistry,
         workspace_intent: WorkspaceIntent,
+        user_content: str = "",
     ) -> ToolRegistry:
         """
         Resolve lightweight tool access for one multi-agent role.
@@ -221,6 +224,7 @@ class AgentOrchestrator(
         :param memory_scope: Memory scope label
         :param full_tools: Pre-built full workspace tool registry
         :param workspace_intent: Parsed workspace intent
+        :param user_content: Original user message
         :return: Tool registry appropriate for this multi-agent turn
         """
         if role_id == "project_manager":
@@ -232,9 +236,19 @@ class AgentOrchestrator(
         if role_id == "reviewer":
             return ToolRegistry()
         if role_id == "developer":
-            return self._tools_for_role(role_id, chat_id, memory_scope, full_tools)
+            if workspace_intent.requires_tools or self._prompt_needs_tools(
+                user_content,
+                role_id,
+            ):
+                return self._tools_for_role(role_id, chat_id, memory_scope, full_tools)
+            return ToolRegistry()
         if role_id in self.FULL_TOOL_ROLES and workspace_intent.wants_file_creation:
             return self._tools_for_role(role_id, chat_id, memory_scope, full_tools)
+        if role_id in {"software_tester", "security"} and is_substantive_software_creation(
+            user_content,
+            workspace_intent,
+        ):
+            return self._build_read_execute_tools(chat_id, memory_scope)
         return ToolRegistry()
 
     def _effective_tool_round_limit(
@@ -745,6 +759,36 @@ class AgentOrchestrator(
             )
 
         workspace_intent = detect_workspace_intent(interpretation_content)
+        action_gate = analyze_action_requirement(
+            interpretation_content,
+            intent=workspace_intent,
+            mode=mode,
+        )
+        if mode == OrchestrationMode.MULTI and not action_gate.requires_action:
+            if on_event:
+                await on_event({
+                    "type": "action_gate_decision",
+                    "requires_action": action_gate.requires_action,
+                    "category": action_gate.category.value,
+                    "reason": action_gate.reason,
+                })
+            self._ambient_context = await context_registry.build_for_message(
+                user_content,
+                chat_id,
+                on_event=on_event,
+                process_context="",
+                client_ip=client_ip,
+                workspace_task_active=False,
+            )
+            return await self._run_no_action_multi(
+                chat_id,
+                interpretation_content,
+                memory_context,
+                effective_strategy,
+                on_event,
+                intervention_queue,
+                action_gate=action_gate,
+            )
         prior_board = await load_task_board_memory(chat_id)
         task_state = build_task_state(
             user_content,

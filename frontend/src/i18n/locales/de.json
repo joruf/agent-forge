@@ -336,7 +336,7 @@
       "clarify": "Klärung",
       "plan": "Planung",
       "execute": "Umsetzung",
-      "test": "Test",
+      "test": "QA-Prüfung",
       "done": "Fertig"
     }
   },

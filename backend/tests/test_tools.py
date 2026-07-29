@@ -8,7 +8,15 @@ from agentforge.tools.shell_security import classify_shell_command
 
 
 @pytest.mark.asyncio
-async def test_normalize_workspace_relative_path_maps_home_github_path(
+async def test_normalize_workspace_relative_path_rejects_source_code() -> None:
+    """Paths that look like Python source must not reach the filesystem layer."""
+    from agentforge.tools.registry import normalize_workspace_relative_path
+
+    with pytest.raises(PermissionError, match="newline|source code|Invalid"):
+        normalize_workspace_relative_path("import sys\nimport time\n")
+
+
+def test_normalize_workspace_relative_path_maps_home_github_path(
     temp_workspace,
     monkeypatch,
 ) -> None:

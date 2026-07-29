@@ -53,18 +53,23 @@ from agentforge.agents.workspace_executor import (
     build_implementation_prompt,
     build_materialization_prompt,
     build_read_task_summary,
+    collect_non_runnable_implementation_paths,
+    collect_placeholder_implementation_paths,
     fallback_file_content,
     file_exists_in_workspace,
+    is_substantive_software_creation,
     missing_requested_files,
     plan_deliverable_files,
     plan_derived_txt_from_heading,
     plan_derived_txt_from_h1,
     list_available_headings,
     plan_write_body_from_html_source,
+    parse_multifile_llm_output,
     prefetch_read_file_contents,
     prepare_deliverable_content,
     read_workspace_file,
     strip_code_fences,
+    validate_workspace_relative_path,
     write_file_direct,
 )
 from agentforge.config import settings
@@ -126,7 +131,9 @@ class DeliverablesMixin:
                         "role": "system",
                         "content": (
                             "You generate complete file contents for software projects. "
-                            "Reply with file content only. No markdown fences, no explanation."
+                            "Reply with file content only. No markdown fences, no explanation. "
+                            "Never output placeholders, TODO stubs, or comments that defer "
+                            "implementation to the user."
                         ),
                     },
                     {
@@ -142,10 +149,17 @@ class DeliverablesMixin:
                 body = ""
                 if not result.get("error"):
                     body = result.get("content") or ""
-                body = prepare_deliverable_content(path, body, user_content, file_paths)
-                success, _output = await write_file_direct(path, body)
-                if success:
-                    written.append(path)
+                parsed_files = parse_multifile_llm_output(body, path)
+                for file_path, raw_body in parsed_files.items():
+                    file_body = prepare_deliverable_content(
+                        file_path,
+                        raw_body,
+                        user_content,
+                        file_paths,
+                    )
+                    success, _output = await write_file_direct(file_path, file_body)
+                    if success and file_path not in written:
+                        written.append(file_path)
 
         if not written:
             return ""
@@ -187,7 +201,10 @@ class DeliverablesMixin:
                 role_id=role_id,
             )
             still_missing = [path for path in missing if not file_exists_in_workspace(path)]
+            substantive = is_substantive_software_creation(user_content, intent)
             for path in still_missing:
+                if substantive:
+                    continue
                 body = prepare_deliverable_content(
                     path,
                     fallback_file_content(path, user_content),
@@ -195,6 +212,27 @@ class DeliverablesMixin:
                     planned,
                 )
                 await write_file_direct(path, body)
+
+            if substantive:
+                placeholder_paths = collect_placeholder_implementation_paths(
+                    user_content,
+                    intent,
+                    missing,
+                )
+                non_runnable_paths = collect_non_runnable_implementation_paths(
+                    user_content,
+                    intent,
+                    missing,
+                )
+                rematerialize_paths = list(
+                    dict.fromkeys(placeholder_paths + non_runnable_paths)
+                )
+                if rematerialize_paths:
+                    await self._materialize_missing_files(
+                        user_content,
+                        rematerialize_paths,
+                        role_id=role_id,
+                    )
 
         created = [path for path in planned if file_exists_in_workspace(path)]
         if not created:
@@ -676,12 +714,36 @@ class DeliverablesMixin:
                     summaries.append(f"Skipped write for `{step.path}` at your request")
                     continue
                 if step.action == AgendaAction.CREATE_DIRECTORY and step.path:
+                    valid, reason = validate_workspace_relative_path(step.path)
+                    if not valid:
+                        error_message = f"Could not create directory: {reason}"
+                        summaries.append(error_message)
+                        if task_state is not None:
+                            seed_step_error_fact(
+                                task_state,
+                                error_message,
+                                step_path=step.path,
+                                kind="directory_create_error",
+                            )
+                        continue
                     target = (settings.workspace_root / step.path).resolve()
                     target.mkdir(parents=True, exist_ok=True)
                     summaries.append(f"Ensured directory `{step.path}`")
                     continue
 
                 if step.action == AgendaAction.WRITE_FILE and step.path:
+                    valid, reason = validate_workspace_relative_path(step.path)
+                    if not valid:
+                        error_message = f"Could not create `{step.path[:80]}…`: {reason}"
+                        summaries.append(error_message)
+                        if task_state is not None:
+                            seed_step_error_fact(
+                                task_state,
+                                error_message,
+                                step_path=step.path[:120],
+                                kind="file_write_error",
+                            )
+                        continue
                     if step.content_from_heading and step.content_source_path:
                         content_tag = step.content_from_heading
                         if (
@@ -753,6 +815,8 @@ class DeliverablesMixin:
                                     kind="file_write_error",
                                 )
                     elif not file_exists_in_workspace(step.path):
+                        if is_substantive_software_creation(user_content, intent):
+                            continue
                         body = prepare_deliverable_content(
                             step.path,
                             fallback_file_content(step.path, user_content),

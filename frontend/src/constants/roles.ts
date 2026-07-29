@@ -6,6 +6,7 @@ export const SINGLE_FALLBACK_ROLE = "developer";
 
 export const DEFAULT_MULTI_ROLES = [
   "project_manager",
+  "architect",
   "developer",
   "reviewer",
   "software_tester",

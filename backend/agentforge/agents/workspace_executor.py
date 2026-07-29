@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import ast
+import asyncio
+import builtins
+import importlib.util
+import py_compile
 import re
+import sys
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from agentforge.agents.deliverable_types import (
@@ -33,6 +41,21 @@ NAMED_FILE = re.compile(
     re.IGNORECASE,
 )
 CODE_FENCE = re.compile(r"^```[\w.-]*\n(.*?)```$", re.DOTALL | re.IGNORECASE)
+MAX_PATH_COMPONENT_LENGTH = 255
+MAX_WORKSPACE_PATH_LENGTH = 512
+_SOURCE_CODE_PATH_MARKERS = re.compile(
+    r"^(import |from .+ import |def |class |#!/|# )",
+    re.MULTILINE,
+)
+_NAMED_FILE_BLOCK = re.compile(
+    r"(?:^|\n)(?P<name>(?:[\w./-]+/)?[\w.-]+\.(?:py|txt|toml|cfg|ini|md|json|yaml|yml|sh))"
+    r"\s*\n```[\w.-]*\n(?P<body>.*?)```",
+    re.DOTALL | re.IGNORECASE,
+)
+_FENCED_BLOCK = re.compile(
+    r"```[\w.-]*\n(?P<body>.*?)```",
+    re.DOTALL,
+)
 LITERAL_TEXT = re.compile(
     r'(?:text|inhalt|content|schreib(?:e|en|st)?|write(?:s|ing)?)\s+["\«„]([^"\»""]+)["\»""]',
     re.IGNORECASE,
@@ -58,6 +81,820 @@ EXPLICIT_BARE_FILENAME = re.compile(
     re.IGNORECASE,
 )
 CONTENT_SOURCE_HEADING = CONTENT_SOURCE_TAG
+
+_PLACEHOLDER_MARKERS = re.compile(
+    r"|".join(
+        (
+            r"\bplaceholder\b",
+            r"\bTODO\b",
+            r"\bFIXME\b",
+            r"you need to implement",
+            r"implement the logic",
+            r"not implemented",
+            r"replace this",
+            r"add (?:your|the) code here",
+            r"placeholder for",
+            r"simulates (?:animation|frames)",
+            r"Generated for request:",
+        )
+    ),
+    re.IGNORECASE,
+)
+
+_CODE_FILE_EXTENSIONS = frozenset(
+    {".py", ".js", ".ts", ".tsx", ".jsx", ".php", ".sh", ".vue", ".sql"}
+)
+
+_SUBSTANTIVE_CODE_TYPE_IDS = frozenset(
+    {"python", "javascript", "typescript", "tsx", "jsx", "vue", "php", "shell", "sql"}
+)
+
+_SUBSTANTIVE_CREATION_HINT = re.compile(
+    r"\b("
+    r"tool|implement|implementation|build|app|script|programm|software|"
+    r"module|class|function|api|library|package|3d|game|server|cli"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def looks_like_source_code(text: str) -> bool:
+    """
+    Detect when text is program source rather than a filesystem path.
+
+    :param text: Candidate path or file body
+    :return: True when the text resembles source code
+    """
+    sample = (text or "").strip()
+    if not sample or "\n" not in sample:
+        return False
+    if _SOURCE_CODE_PATH_MARKERS.search(sample):
+        return True
+    if sample.count("\n") >= 2 and ("import " in sample or "def " in sample):
+        return True
+    return False
+
+
+def validate_workspace_relative_path(path_str: str) -> tuple[bool, str]:
+    """
+    Validate a workspace-relative path before touching the filesystem.
+
+    :param path_str: Absolute or workspace-relative path candidate
+    :return: Tuple of validity flag and error reason
+    """
+    raw = (path_str or "").strip().strip("'\"")
+    if not raw:
+        return False, "Empty path"
+    if "\n" in raw or "\r" in raw:
+        return False, "Path contains newline characters"
+    if len(raw) > MAX_WORKSPACE_PATH_LENGTH:
+        return False, "Path exceeds maximum length"
+    if looks_like_source_code(raw):
+        return False, "Path looks like source code, not a file path"
+    if "```" in raw:
+        return False, "Path contains markdown code fences"
+    for part in Path(raw).parts:
+        if part in {".", ".."}:
+            continue
+        if len(part) > MAX_PATH_COMPONENT_LENGTH:
+            return False, "Path component exceeds filesystem limit"
+    return True, ""
+
+
+def maybe_swap_write_file_arguments(path: str, content: str) -> tuple[str, str]:
+    """
+    Recover from models that swap write_file path and content arguments.
+
+    :param path: Declared target path
+    :param content: Declared file body
+    :return: Corrected path and content
+    """
+    path_ok, _ = validate_workspace_relative_path(path)
+    content_ok, _ = validate_workspace_relative_path(content)
+    if not path_ok and content_ok:
+        return content, path
+    return path, content
+
+
+def parse_multifile_llm_output(raw_content: str, primary_path: str) -> dict[str, str]:
+    """
+    Split a multi-file markdown LLM response into workspace-relative paths.
+
+    :param raw_content: Raw model output that may contain several fenced files
+    :param primary_path: Canonical path for the main deliverable
+    :return: Mapping of workspace-relative path to file body
+    """
+    text = (raw_content or "").strip()
+    if not text:
+        return {primary_path: ""}
+
+    parent = str(Path(primary_path).parent)
+    files: dict[str, str] = {}
+
+    for match in _NAMED_FILE_BLOCK.finditer(text):
+        name = match.group("name").strip()
+        body = match.group("body").strip()
+        if "/" not in name:
+            name = f"{parent}/{name}" if parent != "." else name
+        files[name] = body
+
+    if not files:
+        blocks = [match.group("body").strip() for match in _FENCED_BLOCK.finditer(text)]
+        if len(blocks) >= 2:
+            files[primary_path] = blocks[0]
+            req_path = f"{parent}/requirements.txt" if parent != "." else "requirements.txt"
+            files[req_path] = blocks[1]
+            return files
+        if len(blocks) == 1:
+            return {primary_path: blocks[0]}
+        return {primary_path: strip_code_fences(text)}
+
+    primary_name = Path(primary_path).name
+    if primary_path not in files:
+        blocks = [match.group("body").strip() for match in _FENCED_BLOCK.finditer(text)]
+        if blocks and primary_name.endswith(".py"):
+            files[primary_path] = blocks[0]
+        else:
+            for candidate_path, candidate_body in list(files.items()):
+                if Path(candidate_path).name == primary_name:
+                    files[primary_path] = candidate_body
+                    if candidate_path != primary_path:
+                        del files[candidate_path]
+                    break
+            else:
+                if blocks:
+                    files[primary_path] = blocks[0]
+                elif files:
+                    first_path = next(iter(files))
+                    files[primary_path] = files[first_path]
+                    if first_path != primary_path and not first_path.endswith("requirements.txt"):
+                        del files[first_path]
+    return files
+
+
+def is_placeholder_content(content: str, relative_path: str = "") -> bool:
+    """
+    Heuristically detect stub or placeholder file bodies.
+
+    :param content: File body text
+    :param relative_path: Workspace-relative path for extension-aware checks
+    :return: True when the content looks like a placeholder rather than code
+    """
+    text = (content or "").strip()
+    if not text:
+        return True
+
+    suffix = Path(relative_path).suffix.lower() if relative_path else ""
+    if _PLACEHOLDER_MARKERS.search(text):
+        if not suffix or suffix in _CODE_FILE_EXTENSIONS:
+            return True
+
+    if suffix == ".py":
+        import ast
+
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return True
+        has_logic = any(
+            isinstance(
+                node,
+                (
+                    ast.FunctionDef,
+                    ast.AsyncFunctionDef,
+                    ast.ClassDef,
+                    ast.Import,
+                    ast.ImportFrom,
+                ),
+            )
+            for node in ast.walk(tree)
+        )
+        if not has_logic and _PLACEHOLDER_MARKERS.search(text):
+            return True
+
+    if suffix in _CODE_FILE_EXTENSIONS and len(text.splitlines()) <= 3:
+        return _PLACEHOLDER_MARKERS.search(text) is not None
+
+    return False
+
+
+def is_substantive_software_creation(
+    user_content: str,
+    intent: WorkspaceIntent,
+) -> bool:
+    """
+    Return True when the user expects runnable code rather than literal text.
+
+    :param user_content: Original user message
+    :param intent: Parsed workspace intent
+    :return: Whether implementation-quality checks apply
+    """
+    if not intent.wants_file_creation:
+        return False
+    if extract_literal_text_content(user_content) is not None:
+        return False
+
+    text = user_content or ""
+    matched = match_deliverable_file_types(text)
+    if any(spec.type_id in _SUBSTANTIVE_CODE_TYPE_IDS for spec in matched):
+        return True
+    return _SUBSTANTIVE_CREATION_HINT.search(text) is not None
+
+
+def collect_placeholder_implementation_paths(
+    user_content: str,
+    intent: WorkspaceIntent,
+    required_paths: list[str],
+) -> list[str]:
+    """
+    Return required write paths whose on-disk content is placeholder-only.
+
+    :param user_content: Original user request
+    :param intent: Parsed workspace intent
+    :param required_paths: Canonical paths that must be written
+    :return: Paths containing placeholder or stub content
+    """
+    if not is_substantive_software_creation(user_content, intent):
+        return []
+
+    placeholders: list[str] = []
+    for path in required_paths:
+        if not file_exists_in_workspace(path):
+            continue
+        success, content = read_workspace_file(path)
+        if success and is_placeholder_content(content, path):
+            placeholders.append(path)
+    return placeholders
+
+
+_STDLIB_MODULE_NAMES = frozenset(getattr(sys, "stdlib_module_names", set()))
+
+_IMPORT_TO_PIP: dict[str, str] = {
+    "PIL": "Pillow",
+    "cv2": "opencv-python",
+    "numpy": "numpy",
+    "np": "numpy",
+    "pandas": "pandas",
+    "pd": "pandas",
+    "pygame": "pygame",
+    "pyglet": "pyglet",
+    "vpython": "vpython",
+    "matplotlib": "matplotlib",
+    "plt": "matplotlib",
+    "sklearn": "scikit-learn",
+    "scipy": "scipy",
+    "requests": "requests",
+    "flask": "flask",
+    "fastapi": "fastapi",
+    "uvicorn": "uvicorn",
+    "django": "django",
+    "sqlalchemy": "SQLAlchemy",
+    "pytest": "pytest",
+    "yaml": "PyYAML",
+    "OpenGL": "PyOpenGL",
+    "serial": "pyserial",
+    "bs4": "beautifulsoup4",
+    "docx": "python-docx",
+    "pypdf": "pypdf",
+    "fpdf": "fpdf2",
+    "mpl_toolkits": "matplotlib",
+}
+
+_PIP_TO_IMPORT: dict[str, str] = {
+    "Pillow": "PIL",
+    "opencv-python": "cv2",
+    "scikit-learn": "sklearn",
+    "PyYAML": "yaml",
+    "python-docx": "docx",
+    "fpdf2": "fpdf",
+    "PyOpenGL": "OpenGL",
+    "beautifulsoup4": "bs4",
+    "pyserial": "serial",
+}
+
+
+@dataclass(frozen=True)
+class PythonAnalysis:
+    """Static analysis summary for one Python source body."""
+
+    issues: list[str]
+    third_party_packages: list[str]
+    compile_error: str | None = None
+
+
+def _python_source_from_path_or_content(path_or_content: str) -> str:
+    """
+    Resolve Python source from a workspace path or an inline code body.
+
+    :param path_or_content: Workspace-relative path or raw Python source
+    :return: Python source text
+    """
+    text = path_or_content or ""
+    if not text.strip():
+        return ""
+    if "\n" in text or looks_like_source_code(text):
+        return text
+    if len(text) > MAX_WORKSPACE_PATH_LENGTH:
+        return text
+    valid, _ = validate_workspace_relative_path(text)
+    if not valid:
+        return text
+    try:
+        absolute = (settings.workspace_root.resolve() / text).resolve()
+        root = settings.workspace_root.resolve()
+        if absolute.is_file() and str(absolute).startswith(str(root)):
+            return absolute.read_text(encoding="utf-8")
+    except (OSError, PermissionError, ValueError):
+        return text
+    return text
+
+
+def _pip_package_for_module(module_name: str) -> str | None:
+    root = (module_name or "").split(".")[0]
+    if not root or root.startswith("_"):
+        return None
+    if root in _STDLIB_MODULE_NAMES:
+        return None
+    if root == "mpl_toolkits":
+        return "matplotlib"
+    return _IMPORT_TO_PIP.get(root, root)
+
+
+def _import_name_for_pip_package(package_name: str) -> str:
+    """
+    Map a pip package name to the top-level Python module used for import checks.
+
+    :param package_name: Pip requirement name
+    :return: Module name for importlib lookup
+    """
+    normalized = package_name.split("==")[0].split(">=")[0].split("[")[0].strip()
+    if normalized in _PIP_TO_IMPORT:
+        return _PIP_TO_IMPORT[normalized]
+    return normalized.replace("-", "_").lower()
+
+
+def _third_party_imports_unavailable(packages: list[str]) -> list[str]:
+    """
+    Return pip package names that are not importable in the active interpreter.
+
+    :param packages: Third-party pip package names
+    :return: Packages that cannot be imported
+    """
+    missing: list[str] = []
+    for package in packages:
+        module_name = _import_name_for_pip_package(package)
+        if importlib.util.find_spec(module_name) is None:
+            missing.append(package)
+    return missing
+
+
+def _collect_python_import_bindings(tree: ast.AST) -> tuple[set[str], list[str]]:
+    bound_names: set[str] = set()
+    third_party_packages: list[str] = []
+    seen_packages: set[str] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".")[0]
+                bound_names.add(bound)
+                package = _pip_package_for_module(alias.name)
+                if package and package not in seen_packages:
+                    seen_packages.add(package)
+                    third_party_packages.append(package)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and node.level == 0:
+                package = _pip_package_for_module(node.module)
+                if package and package not in seen_packages:
+                    seen_packages.add(package)
+                    third_party_packages.append(package)
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                bound_names.add(alias.asname or alias.name)
+
+    return bound_names, third_party_packages
+
+
+def _collect_undefined_loaded_names(tree: ast.AST, bound_names: set[str]) -> list[str]:
+    builtin_names = set(dir(builtins))
+    module_scope: set[str] = set(bound_names)
+    undefined: list[str] = []
+    seen: set[str] = set()
+
+    class _ScopeVisitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.scopes: list[set[str]] = [set()]
+
+        def _bind(self, name: str) -> None:
+            self.scopes[-1].add(name)
+
+        def _bind_target(self, node: ast.AST) -> None:
+            if isinstance(node, ast.Name):
+                self._bind(node.id)
+            elif isinstance(node, (ast.Tuple, ast.List)):
+                for elt in node.elts:
+                    self._bind_target(elt)
+
+        def _is_bound(self, name: str) -> bool:
+            if name in builtin_names or name.startswith("__") and name.endswith("__"):
+                return True
+            if name in module_scope:
+                return True
+            return any(name in scope for scope in reversed(self.scopes))
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            module_scope.add(node.name)
+            arg_names = {arg.arg for arg in node.args.args}
+            arg_names.update(arg.arg for arg in node.args.kwonlyargs)
+            if node.args.vararg:
+                arg_names.add(node.args.vararg.arg)
+            if node.args.kwarg:
+                arg_names.add(node.args.kwarg.arg)
+            self.scopes.append(set(arg_names))
+            self.generic_visit(node)
+            self.scopes.pop()
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self.visit_FunctionDef(node)  # type: ignore[arg-type]
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            module_scope.add(node.name)
+            self.scopes.append(set())
+            self.generic_visit(node)
+            self.scopes.pop()
+
+        def visit_Assign(self, node: ast.Assign) -> None:
+            for target in node.targets:
+                self._bind_target(target)
+            self.generic_visit(node)
+
+        def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+            if node.target is not None:
+                self._bind_target(node.target)
+            self.generic_visit(node)
+
+        def visit_For(self, node: ast.For) -> None:
+            self._bind_target(node.target)
+            self.generic_visit(node)
+
+        def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+            self.visit_For(node)  # type: ignore[arg-type]
+
+        def visit_With(self, node: ast.With) -> None:
+            for item in node.items:
+                if item.optional_vars is not None:
+                    self._bind_target(item.optional_vars)
+            self.generic_visit(node)
+
+        def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+            if node.name:
+                self._bind(node.name)
+            self.generic_visit(node)
+
+        def visit_Name(self, node: ast.Name) -> None:
+            if not isinstance(node.ctx, ast.Load):
+                return
+            name = node.id
+            if self._is_bound(name):
+                return
+            if name in seen:
+                return
+            seen.add(name)
+            undefined.append(name)
+
+    _ScopeVisitor().visit(tree)
+    return undefined
+
+
+def analyze_python_file(
+    path_or_content: str,
+    relative_path: str = "",
+    *,
+    user_content: str = "",
+) -> list[str]:
+    """
+    Return static analysis issues for Python source content.
+
+    Checks syntax, py_compile, likely missing imports, and dependency metadata.
+
+    :param path_or_content: File path or raw Python source
+    :param relative_path: Workspace-relative path for requirements.txt checks
+    :param user_content: Original user request for stdlib preference checks
+    :return: Human-readable issue strings; empty when no issues found
+    """
+    return analyze_python_file_details(
+        path_or_content,
+        relative_path,
+        user_content=user_content,
+    ).issues
+
+
+def analyze_python_file_details(
+    path_or_content: str,
+    relative_path: str = "",
+    *,
+    user_content: str = "",
+) -> PythonAnalysis:
+    """
+    Return structured Python analysis for one file body.
+
+    :param path_or_content: File path or raw Python source
+    :param relative_path: Workspace-relative path for requirements.txt checks
+    :return: Structured analysis summary
+    """
+    content = _python_source_from_path_or_content(path_or_content)
+    issues: list[str] = []
+    compile_error: str | None = None
+    if not content.strip():
+        return PythonAnalysis(["empty Python file"], [], None)
+
+    try:
+        tree = ast.parse(content, filename=relative_path or "<string>")
+    except SyntaxError as exc:
+        message = f"syntax error: {exc.msg} (line {exc.lineno})"
+        return PythonAnalysis([message], [], message)
+
+    bound_names, third_party_packages = _collect_python_import_bindings(tree)
+    undefined_names = _collect_undefined_loaded_names(tree, bound_names)
+    if undefined_names:
+        preview = ", ".join(undefined_names[:8])
+        issues.append(f"likely missing imports for: {preview}")
+
+    try:
+        temp_path = ""
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".py",
+            delete=False,
+            encoding="utf-8",
+        ) as handle:
+            handle.write(content)
+            temp_path = handle.name
+        py_compile.compile(temp_path, doraise=True)
+    except py_compile.PyCompileError as exc:
+        compile_error = f"compile error: {exc.msg}"
+        issues.append(compile_error)
+    finally:
+        if temp_path:
+            try:
+                Path(temp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    if user_content and prefers_python_stdlib_only(user_content) and third_party_packages:
+        packages = ", ".join(third_party_packages)
+        issues.append(
+            "third-party libraries used without explicit request; "
+            f"prefer Python stdlib (tkinter, math, time): {packages}"
+        )
+
+    if third_party_packages and relative_path:
+        req_path = Path(relative_path).parent / "requirements.txt"
+        if not file_exists_in_workspace(str(req_path)):
+            packages = ", ".join(third_party_packages)
+            issues.append(
+                f"missing requirements.txt for third-party packages: {packages}"
+            )
+        else:
+            unavailable = _third_party_imports_unavailable(third_party_packages)
+            if unavailable:
+                packages = ", ".join(unavailable)
+                issues.append(f"third-party packages not installed: {packages}")
+
+    return PythonAnalysis(issues, third_party_packages, compile_error)
+
+
+def is_runnable_python_content(
+    content: str,
+    relative_path: str = "",
+    *,
+    user_content: str = "",
+) -> bool:
+    """
+    Return True when Python content passes static runnable checks.
+
+    :param content: Python source body
+    :param relative_path: Workspace-relative path for dependency checks
+    :return: Whether the file appears runnable
+    """
+    if not relative_path.endswith(".py"):
+        return True
+    return not analyze_python_file(content, relative_path, user_content=user_content)
+
+
+def collect_non_runnable_implementation_paths(
+    user_content: str,
+    intent: WorkspaceIntent,
+    required_paths: list[str],
+) -> list[str]:
+    """
+    Return required write paths whose on-disk Python is not runnable.
+
+    :param user_content: Original user request
+    :param intent: Parsed workspace intent
+    :param required_paths: Canonical paths that must be written
+    :return: Paths containing non-runnable Python deliverables
+    """
+    if not is_substantive_software_creation(user_content, intent):
+        return []
+
+    broken: list[str] = []
+    for path in required_paths:
+        if not path.endswith(".py"):
+            continue
+        if not file_exists_in_workspace(path):
+            continue
+        success, content = read_workspace_file(path)
+        if success and not is_runnable_python_content(
+            content,
+            path,
+            user_content=user_content,
+        ):
+            broken.append(path)
+    return broken
+
+
+def sync_requirements_txt(relative_dir: str, third_party_packages: list[str]) -> str | None:
+    """
+    Create or update requirements.txt with third-party packages.
+
+    :param relative_dir: Workspace-relative directory containing deliverables
+    :param third_party_packages: Pip package names to ensure are listed
+    :return: Workspace-relative requirements path when written, else None
+    """
+    packages = sorted({item.strip() for item in third_party_packages if item.strip()})
+    if not packages:
+        return None
+
+    normalized_dir = normalize_workspace_relative_path(relative_dir.rstrip("/") or ".")
+    req_relative = f"{normalized_dir}/requirements.txt" if normalized_dir != "." else "requirements.txt"
+    existing_lines: list[str] = []
+    if file_exists_in_workspace(req_relative):
+        success, content = read_workspace_file(req_relative)
+        if success:
+            existing_lines = [
+                line.strip()
+                for line in content.splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            ]
+
+    merged: list[str] = []
+    seen_lower: set[str] = set()
+    for line in existing_lines:
+        key = line.split("==")[0].split(">=")[0].split("[")[0].strip().lower()
+        if not key or key in seen_lower:
+            continue
+        seen_lower.add(key)
+        merged.append(line)
+    for package in packages:
+        key = package.split("==")[0].split(">=")[0].split("[")[0].strip().lower()
+        if not key or key in seen_lower:
+            continue
+        seen_lower.add(key)
+        merged.append(package)
+
+    body = "\n".join(merged) + "\n"
+    target = (settings.workspace_root.resolve() / req_relative).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding="utf-8")
+    return req_relative
+
+
+_THIRD_PARTY_LIBRARY_NAMES = re.compile(
+    r"\b("
+    r"pyglet|pygame|matplotlib|numpy|pandas|flask|django|fastapi|requests|"
+    r"pillow|opencv|torch|tensorflow|sklearn|scipy|streamlit|gradio|vpython"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_STANDALONE_PYTHON_REQUEST = re.compile(
+    r"\b("
+    r"python\s+programm|python\s+script|python\s+tool|python\s+3d|"
+    r"3d\s+animation|standalone|einfach(?:es|en|er)?\s+python"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def prefers_python_stdlib_only(user_content: str) -> bool:
+    """
+    Decide whether a request should use stdlib-only Python unless a library is named.
+
+    :param user_content: Original user request
+    :return: True when third-party libraries were not requested explicitly
+    """
+    text = user_content or ""
+    if _THIRD_PARTY_LIBRARY_NAMES.search(text):
+        return False
+    return bool(_STANDALONE_PYTHON_REQUEST.search(text))
+
+
+def python_stdlib_delivery_rules(user_content: str) -> str:
+    """
+    Build optional prompt rules steering simple Python tools toward stdlib.
+
+    :param user_content: Original user request
+    :return: Extra prompt lines or an empty string
+    """
+    if not prefers_python_stdlib_only(user_content):
+        return ""
+    return (
+        "- Prefer Python stdlib only (tkinter, math, time, cmath) for this "
+        "standalone script unless the user named a specific library.\n"
+        "- Do not use pyglet, pygame, matplotlib, or OpenGL unless explicitly "
+        "requested.\n"
+        "- Do not create virtual environments; dependencies are installed "
+        "automatically via requirements.txt.\n"
+    )
+
+
+async def install_python_requirements(relative_dir: str) -> tuple[bool, str]:
+    """
+    Install pip packages listed in a workspace project's requirements.txt.
+
+    :param relative_dir: Workspace-relative directory containing requirements.txt
+    :return: Tuple of success flag and status message
+    """
+    normalized_dir = normalize_workspace_relative_path(relative_dir.rstrip("/") or ".")
+    req_relative = (
+        f"{normalized_dir}/requirements.txt" if normalized_dir != "." else "requirements.txt"
+    )
+    if not file_exists_in_workspace(req_relative):
+        return False, "No requirements.txt"
+
+    cwd = settings.workspace_root.resolve()
+    if normalized_dir != ".":
+        cwd = (cwd / normalized_dir).resolve()
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        "requirements.txt",
+        cwd=str(cwd),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    output = (stdout.decode() + stderr.decode()).strip()
+    if proc.returncode == 0:
+        return True, f"Installed dependencies from {req_relative}"
+    detail = output[:500] if output else f"exit code {proc.returncode}"
+    return False, f"pip install failed: {detail}"
+
+
+def _python_compile_error(content: str, relative_path: str) -> str | None:
+    if not relative_path.endswith(".py"):
+        return None
+    return analyze_python_file_details(content, relative_path).compile_error
+
+
+def _content_is_strict_subset(candidate: str, existing: str) -> bool:
+    candidate_lines = {line.strip() for line in candidate.splitlines() if line.strip()}
+    existing_lines = {line.strip() for line in existing.splitlines() if line.strip()}
+    return candidate_lines <= existing_lines and candidate.strip() != existing.strip()
+
+
+def should_skip_redundant_write(relative_path: str, new_content: str) -> bool:
+    """
+    Skip duplicate writes or attempts to replace real code with placeholders.
+
+    :param relative_path: Workspace-relative file path
+    :param new_content: Candidate file body
+    :return: True when the write should not be performed
+    """
+    if not file_exists_in_workspace(relative_path):
+        return False
+    success, existing = read_workspace_file(relative_path)
+    if not success:
+        return False
+    if existing.strip() == new_content.strip():
+        return True
+    if (
+        not is_placeholder_content(existing, relative_path)
+        and is_placeholder_content(new_content, relative_path)
+    ):
+        return True
+
+    if relative_path.endswith(".py"):
+        try:
+            existing_error = _python_compile_error(existing, relative_path)
+            new_error = _python_compile_error(new_content, relative_path)
+        except OSError:
+            return False
+        if existing_error and new_error and existing_error == new_error:
+            return True
+        if (
+            not is_runnable_python_content(existing, relative_path)
+            and not is_runnable_python_content(new_content, relative_path)
+            and _content_is_strict_subset(new_content, existing)
+        ):
+            return True
+    return False
 
 
 def extract_literal_text_content(user_content: str) -> str | None:
@@ -790,6 +1627,114 @@ footer {
 """
 
 
+def default_python_3d_animation_main(duration_seconds: float = 30.0) -> str:
+    """
+    Return a stdlib tkinter 3D wireframe animation script.
+
+    :param duration_seconds: How long the animation runs before exit
+    :return: Complete Python source
+    """
+    return f'''#!/usr/bin/env python3
+"""Display a rotating 3D wireframe cube, then exit."""
+
+import math
+import time
+import tkinter as tk
+
+VERTICES = [
+    (-1, -1, -1), (-1, -1, 1), (-1, 1, -1), (-1, 1, 1),
+    (1, -1, -1), (1, -1, 1), (1, 1, -1), (1, 1, 1),
+]
+EDGES = [
+    (0, 1), (0, 2), (0, 4), (1, 3), (1, 5), (2, 3), (2, 6),
+    (3, 7), (4, 5), (4, 6), (5, 7), (6, 7),
+]
+DURATION = {duration_seconds}
+
+
+def rotate_y(point, angle):
+    x, y, z = point
+    c, s = math.cos(angle), math.sin(angle)
+    return (x * c + z * s, y, -x * s + z * c)
+
+
+def rotate_x(point, angle):
+    x, y, z = point
+    c, s = math.cos(angle), math.sin(angle)
+    return (x, y * c - z * s, y * s + z * c)
+
+
+def project(point, width, height, scale=120.0, distance=4.0):
+    x, y, z = point
+    factor = scale / (distance + z)
+    return (width / 2 + x * factor, height / 2 - y * factor)
+
+
+def main():
+    root = tk.Tk()
+    root.title("3D Animation")
+    width, height = 640, 480
+    canvas = tk.Canvas(root, width=width, height=height, bg="black")
+    canvas.pack()
+    start = time.time()
+    angle = 0.0
+
+    def frame():
+        nonlocal angle
+        elapsed = time.time() - start
+        if elapsed >= DURATION:
+            root.destroy()
+            return
+        canvas.delete("all")
+        angle += 0.04
+        points = [
+            project(rotate_x(rotate_y(v, angle), angle * 0.7), width, height)
+            for v in VERTICES
+        ]
+        for i, j in EDGES:
+            canvas.create_line(*points[i], *points[j], fill="#00d4ff", width=2)
+        canvas.create_text(
+            10, 20, anchor="nw", fill="white",
+            text=f"{{DURATION - elapsed:.1f}}s remaining",
+        )
+        root.after(33, frame)
+
+    root.after(0, frame)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def _python_animation_duration_seconds(user_content: str) -> float:
+    """
+    Extract animation duration from a user request when present.
+
+    :param user_content: Original user request
+    :return: Duration in seconds (defaults to 30)
+    """
+    match = re.search(r"(\d+)\s*(?:sekunden|seconds|s)\b", user_content or "", re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    return 30.0
+
+
+def _requests_python_3d_animation(user_content: str) -> bool:
+    """
+    Return True when the user asks for a Python 3D animation program.
+
+    :param user_content: Original user request
+    :return: Whether the tkinter animation fallback applies
+    """
+    text = user_content or ""
+    return bool(
+        re.search(r"\b3d\s*animation\b", text, re.IGNORECASE)
+        and re.search(r"\bpython\b", text, re.IGNORECASE)
+    )
+
+
 def default_js_scaffold() -> str:
     """
     Return JavaScript that outputs the browser type into the HTML page.
@@ -974,6 +1919,12 @@ def prepare_deliverable_content(
     body = strip_code_fences(raw_content or "")
     if not body.strip():
         body = fallback_file_content(relative_path, user_content)
+    elif (
+        relative_path.endswith(".py")
+        and is_placeholder_content(body, relative_path)
+        and _requests_python_3d_animation(user_content)
+    ):
+        body = fallback_file_content(relative_path, user_content)
     return normalize_deliverable_content(
         relative_path,
         body,
@@ -997,12 +1948,21 @@ def build_materialization_prompt(
     """
     siblings = [Path(item).name for item in planned_files if item != relative_path]
     sibling_line = ", ".join(siblings) if siblings else "none"
+    stdlib_rules = python_stdlib_delivery_rules(user_content)
     return (
         f"Original request: {user_content}\n\n"
         f"Generate the complete contents for this file only: {relative_path}\n"
         f"Other project files: {sibling_line}\n\n"
         "Rules:\n"
         "- Output file content only. No markdown fences. No explanation.\n"
+        "- Write complete, runnable code — never placeholders, TODO stubs, or "
+        "comments that say 'implement here'.\n"
+        "- For Python: include every import the code uses (stdlib and third-party).\n"
+        f"{stdlib_rules}"
+        "- For Python third-party libraries, also ensure requirements.txt exists "
+        "in the same directory listing each pip package.\n"
+        "- Verify Python mentally with py_compile rules: valid syntax, no undefined "
+        "names from missing imports, correct library APIs (no hallucinated methods).\n"
         "- Use relative asset paths only (e.g. styles.css, app.js).\n"
         "- Never use absolute filesystem paths in href or src.\n"
         "- Put CSS rules only in .css files.\n"
@@ -1048,6 +2008,10 @@ def fallback_file_content(relative_path: str, user_content: str) -> str:
         if literal is not None:
             return literal if literal.endswith("\n") else f"{literal}\n"
         return "Generated PDF document.\n"
+    if suffix == ".py" and _requests_python_3d_animation(user_content):
+        return default_python_3d_animation_main(
+            _python_animation_duration_seconds(user_content),
+        )
     return f"Generated for request:\n{user_content.strip()}\n"
 
 
@@ -1111,10 +2075,20 @@ def build_implementation_prompt(user_content: str, file_paths: list[str]) -> str
     """
     files_block = "\n".join(f"- {path}" for path in file_paths)
     basenames = ", ".join(Path(path).name for path in file_paths)
+    stdlib_rules = python_stdlib_delivery_rules(user_content)
     return (
         f"User request: {user_content}\n\n"
         "Implementation task:\n"
         "Create the requested files on disk using write_file.\n"
+        "Write complete, runnable implementations — no placeholders, TODO stubs, "
+        "or 'implement here' comments.\n"
+        "For Python deliverables:\n"
+        "- Include every import used in the file (stdlib and third-party).\n"
+        f"{stdlib_rules}"
+        "- When using third-party packages, also write requirements.txt in the "
+        "same folder with pip package names.\n"
+        "- Use correct library APIs; do not invent methods or modules.\n"
+        "- Do not create virtual environments; write requirements.txt instead.\n"
         "Do not answer with JSON, search results, or pasted code only.\n"
         "You must call write_file for every path below:\n"
         f"{files_block}\n\n"
@@ -1163,6 +2137,12 @@ async def write_file_direct(relative_path: str, content: str) -> tuple[bool, str
     :param content: File contents
     :return: Tuple of success flag and tool output
     """
+    relative_path, content = maybe_swap_write_file_arguments(relative_path, content)
+    valid, reason = validate_workspace_relative_path(relative_path)
+    if not valid:
+        return False, f"Invalid file path: {reason}"
+    if should_skip_redundant_write(relative_path, content):
+        return True, f"Skipped redundant write: {relative_path}"
     tool = WriteFileTool()
     result = await tool.execute({"path": relative_path, "content": content})
     return result.success, result.output

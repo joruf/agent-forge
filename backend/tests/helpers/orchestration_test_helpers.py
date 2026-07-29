@@ -43,18 +43,37 @@ def patch_chat_ready(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def patch_materialize_with_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """
-    Skip LLM file generation and rely on deterministic fallback content.
+    Skip LLM file generation and write deterministic fallback content instead.
 
     :param monkeypatch: Pytest monkeypatch fixture
     """
 
     async def fake_materialize(
         self: AgentOrchestrator,
-        _user_content: str,
-        _file_paths: list[str],
+        user_content: str,
+        file_paths: list[str],
         role_id: str = "developer",
     ) -> str:
-        return ""
+        from agentforge.agents.workspace_executor import (
+            fallback_file_content,
+            prepare_deliverable_content,
+            write_file_direct,
+        )
+
+        written: list[str] = []
+        for path in file_paths:
+            body = prepare_deliverable_content(
+                path,
+                fallback_file_content(path, user_content),
+                user_content,
+                file_paths,
+            )
+            success, _output = await write_file_direct(path, body)
+            if success:
+                written.append(path)
+        if not written:
+            return ""
+        return "Created files on disk:\n- " + "\n- ".join(written)
 
     monkeypatch.setattr(AgentOrchestrator, "_materialize_missing_files", fake_materialize)
 

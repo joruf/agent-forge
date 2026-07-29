@@ -55,7 +55,10 @@
     "researcher": { "name": "Rechercheur", "description": "Recherchiert externe Themen per Websuche und Gedächtnis; hat keinen Dateizugriff und kann diesen Code nicht direkt einsehen." },
     "documentation": { "name": "Dokumentation", "description": "Erstellt und pflegt Dokumentation und technische Texte." },
     "project_manager": { "name": "Projektleiter", "description": "Koordiniert Agenten, bindet den Nutzer ein und liefert Ergebnisse." },
-    "software_tester": { "name": "Software-Tester", "description": "Entwirft Testfälle, führt Tests aus und meldet Qualitätsprobleme." },
+    "software_tester": {
+      "name": "QA-Agent — Qualitätssicherung",
+      "description": "Prüft, ob Lieferungen funktionieren: liest Dateien, führt Compile- und Shell-Tests aus (z. B. py_compile) und meldet FINDINGS mit Schweregrad — schreibt keinen Anwendungscode."
+    },
     "security": { "name": "Security Engineer", "description": "Prüft Code und Architektur auf Sicherheitslücken." },
     "devops": { "name": "DevOps Engineer", "description": "CI/CD, Deployment-Skripte und Infrastruktur-Automatisierung." }
   },
